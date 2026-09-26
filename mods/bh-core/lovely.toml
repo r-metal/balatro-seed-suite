@@ -1,0 +1,54 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = -10
+
+# bh-core: shared library for the suite (events, simulator). Other mods require its
+# modules by name; nothing depends on the order mods are appended to main.lua.
+[[patches]]
+[patches.module]
+source = "src/init.lua"
+before = "main.lua"
+name = "bhcore.init"
+
+[[patches]]
+[patches.module]
+source = "src/events.lua"
+before = "main.lua"
+name = "bhcore.events"
+
+[[patches]]
+[patches.module]
+source = "src/fs.lua"
+before = "main.lua"
+name = "bhcore.fs"
+
+[[patches]]
+[patches.module]
+source = "src/sim/state.lua"
+before = "main.lua"
+name = "bhcore.sim.state"
+
+[[patches]]
+[patches.module]
+source = "src/sim/sandbox.lua"
+before = "main.lua"
+name = "bhcore.sim.sandbox"
+
+[[patches]]
+[patches.module]
+source = "src/sim/card.lua"
+before = "main.lua"
+name = "bhcore.sim.card"
+
+[[patches]]
+[patches.module]
+source = "src/sim/predict.lua"
+before = "main.lua"
+name = "bhcore.sim.predict"
+
+[[patches]]
+[patches.copy]
+target = "main.lua"
+position = "append"
+sources = ["src/boot.lua"]

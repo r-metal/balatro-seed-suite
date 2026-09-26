@@ -1,0 +1,61 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+# Modules: each file is require()-able by name. The smoke rig reads this list
+# to load the mod the same way lovely does, so keep one [[patches]] per module.
+[[patches]]
+[patches.module]
+source = "src/store.lua"
+before = "main.lua"
+name = "saveslots.store"
+
+[[patches]]
+[patches.module]
+source = "src/checkpoint.lua"
+before = "main.lua"
+name = "saveslots.checkpoint"
+
+[[patches]]
+[patches.module]
+source = "src/preview.lua"
+before = "main.lua"
+name = "saveslots.preview"
+
+[[patches]]
+[patches.module]
+source = "src/sharecode.lua"
+before = "main.lua"
+name = "saveslots.sharecode"
+
+[[patches]]
+[patches.module]
+source = "src/ui.lua"
+before = "main.lua"
+name = "saveslots.ui"
+
+[[patches]]
+[patches.module]
+source = "src/entry.lua"
+before = "main.lua"
+name = "saveslots.entry"
+
+[[patches]]
+[patches.module]
+source = "src/practice.lua"
+before = "main.lua"
+name = "saveslots.practice"
+
+[[patches]]
+[patches.module]
+source = "src/init.lua"
+before = "main.lua"
+name = "saveslots.init"
+
+# Boot: runs at the end of main.lua, after every game file has loaded.
+[[patches]]
+[patches.copy]
+target = "main.lua"
+position = "append"
+sources = ["src/boot.lua"]

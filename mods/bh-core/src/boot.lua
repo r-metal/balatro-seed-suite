@@ -1,0 +1,1 @@
+require('bhcore.init')

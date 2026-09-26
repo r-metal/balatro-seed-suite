@@ -1,0 +1,30 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+# SeedOracle: predicts tags, bosses, vouchers, shops and packs for the current seed. Contracts: docs/contracts-0.2.md.
+
+[[patches]]
+[patches.module]
+source = "src/oracle.lua"
+before = "main.lua"
+name = "seedoracle.oracle"
+
+[[patches]]
+[patches.module]
+source = "src/ui.lua"
+before = "main.lua"
+name = "seedoracle.ui"
+
+[[patches]]
+[patches.module]
+source = "src/init.lua"
+before = "main.lua"
+name = "seedoracle.init"
+
+[[patches]]
+[patches.copy]
+target = "main.lua"
+position = "append"
+sources = ["src/boot.lua"]

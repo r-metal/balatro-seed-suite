@@ -1,0 +1,36 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+# RunJournal: records every run locally, with stats and CSV/JSON export. Contracts: docs/contracts-0.2.md.
+
+[[patches]]
+[patches.module]
+source = "src/recorder.lua"
+before = "main.lua"
+name = "runjournal.recorder"
+
+[[patches]]
+[patches.module]
+source = "src/stats.lua"
+before = "main.lua"
+name = "runjournal.stats"
+
+[[patches]]
+[patches.module]
+source = "src/ui.lua"
+before = "main.lua"
+name = "runjournal.ui"
+
+[[patches]]
+[patches.module]
+source = "src/init.lua"
+before = "main.lua"
+name = "runjournal.init"
+
+[[patches]]
+[patches.copy]
+target = "main.lua"
+position = "append"
+sources = ["src/boot.lua"]

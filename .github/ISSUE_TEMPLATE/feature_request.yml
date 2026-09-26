@@ -1,0 +1,11 @@
+name: Idea or request
+description: A filter clause, a prediction, a UI change...
+labels: [enhancement]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What would you like, and what would you use it for?
+      description: A concrete example helps most, e.g. the filter you wanted to write and couldn't.
+    validations:
+      required: true

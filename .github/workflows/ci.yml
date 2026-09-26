@@ -1,0 +1,20 @@
+# What CI can check without the game: the game source is never in this repo, so unit
+# tests and the smoke rig run locally (make check, see CONTRIBUTING.md).
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -yq luajit
+      - run: make lint
+      - run: make -C native
+      - run: python3 scripts/release.py version
+      - run: make dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

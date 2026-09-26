@@ -1,0 +1,54 @@
+[manifest]
+version = "1.0.0"
+dump_lua = true
+priority = 0
+
+# SeedFinder: searches seeds against multi-clause filters on worker threads. Contracts: docs/contracts-0.2.md.
+
+[[patches]]
+[patches.module]
+source = "src/filter.lua"
+before = "main.lua"
+name = "seedfinder.filter"
+
+[[patches]]
+[patches.module]
+source = "src/engine.lua"
+before = "main.lua"
+name = "seedfinder.engine"
+
+[[patches]]
+[patches.module]
+source = "src/worker.lua"
+before = "main.lua"
+name = "seedfinder.worker"
+
+[[patches]]
+[patches.module]
+source = "src/route.lua"
+before = "main.lua"
+name = "seedfinder.route"
+
+[[patches]]
+[patches.module]
+source = "src/odds.lua"
+before = "main.lua"
+name = "seedfinder.odds"
+
+[[patches]]
+[patches.module]
+source = "src/ui.lua"
+before = "main.lua"
+name = "seedfinder.ui"
+
+[[patches]]
+[patches.module]
+source = "src/init.lua"
+before = "main.lua"
+name = "seedfinder.init"
+
+[[patches]]
+[patches.copy]
+target = "main.lua"
+position = "append"
+sources = ["src/boot.lua"]

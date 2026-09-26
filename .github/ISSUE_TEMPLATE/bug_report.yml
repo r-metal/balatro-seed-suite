@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in the suite broke or behaves wrongly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Include the seed, deck and stake if it involves a prediction or a Finder hit.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Start a run on seed ...\n2. Open the Seed Oracle (Ctrl+O)\n3. ..."
+  - type: input
+    id: suite
+    attributes:
+      label: Suite version
+      description: The release you installed, e.g. 0.3.0
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Balatro and lovely versions
+      description: The game version is at the top right of the main menu. The lovely version is the first line of its log.
+      placeholder: Balatro 1.0.1o, lovely 0.9.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      options: [Windows, Linux (Proton), macOS, Steam Deck]
+    validations:
+      required: true
+  - type: input
+    id: mods
+    attributes:
+      label: Other mods installed
+      placeholder: none / Steamodded 1.x / Brainstorm / ...
+  - type: textarea
+    id: log
+    attributes:
+      label: lovely log
+      description: Attach the newest file from `Mods/lovely/log/`, or paste the part with the error.
+      render: text

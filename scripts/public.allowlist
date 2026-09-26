@@ -1,0 +1,26 @@
+# What `make export` publishes to the public repo.
+# One fnmatch glob per line against repo paths (* crosses /); `!` excludes; the last
+# matching line wins. Anything not matched stays in the private repo.
+mods/*
+native/Makefile
+native/src/*
+native/lua/*
+native/test/*
+rig/*
+tests/*
+!tests/test_brainstorm.lua
+scripts/*
+.github/*
+docs/bh-core.md
+docs/contracts-0.2.md
+docs/SPEC.md
+docs/media/*
+journal/*
+!journal/2026-09-23-relayed-messages-derail-subagents.md
+!journal/2026-09-23-make-error-line-gate.md
+Makefile
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+LICENSE
+.gitignore

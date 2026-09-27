@@ -118,3 +118,26 @@ Scenarios drive the real game. Don't fake `G` or skip the game to make one pass.
 - Hanging or leftover sessions: `headless-run --list`, then `headless-run --stop <id>`.
 - `[ALSOFT] (WW) ...` lines in `log.txt` are expected, because audio is on the null backend.
 - `LONG DT @ ...` lines come from vanilla's frame timer and are harmless.
+
+## The real-lovely rig (compatibility)
+
+`rig/lovely-rig.sh <scenario> [--smods] [--mod <dir>]...` (or `make lovely-smoke S=<name> [SMODS=1]`)
+runs the same scenario driver in the real game. The difference from `smoke.sh` is that it uses
+the **real lovely injector**: its Linux build `liblovely.so`, loaded with `LD_PRELOAD` into native
+LÖVE 11.5. It runs headless, like `smoke.sh`, with a throwaway Mods folder in
+`build/lovely-rig/<name>/Mods` that holds:
+
+- the release zip, as users install it (`--suite` to pick another);
+- Steamodded with `--smods` (a copy in `tools/smods-*/`), and any `--mod` folders (Pokermon for the
+  content-mod case);
+- the scenario driver, packaged as a lovely mod (`zz-rig-driver`) that appends the driver to
+  `main.lua`, exactly where `smoke.sh` puts it.
+
+`make lovely-check` runs the compatibility matrix:
+- plain lovely;
+- Steamodded (Finder search, Oracle, Mods-menu listing);
+- Steamodded with Pokermon.
+
+Most scenarios assume the unmodded game's profile and flow, so the Steamodded ones are written
+for it and named `lovely_*`. `smoke.sh all` skips them. It never touches a real Mods folder.
+

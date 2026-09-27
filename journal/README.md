@@ -16,3 +16,4 @@ Things learned while building the mod suite that surprised us or cost time. One 
 - [2026-09-23 · Traps met building the Oracle, RunJournal and practice UIs](2026-09-23-oracle-and-ui-traps.md)
 - [2026-09-23 · Vanilla UI widget traps (from the Finder UI)](2026-09-23-vanilla-ui-widget-traps.md)
 - [2026-09-26 · One zip, one mod root: how lovely finds mods](2026-09-26-lovely-bundle-layout.md)
+- [2026-09-26 · What Steamodded changes under the suite](2026-09-26-steamodded-compat.md)

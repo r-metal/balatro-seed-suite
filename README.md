@@ -54,7 +54,7 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 
 ## Safe to install
 
-- **Lovely only.** No Steamodded, and no other dependencies.
+- **Lovely only.** Steamodded isn't needed, but the suite works alongside it.
 - **Leaves achievements alone.** Nothing in the suite touches achievements or unlocks. The Finder's **Play** starts
   an unseeded run, so it counts for unlocks, stats and high scores.
 - **Offline.** It never connects to anything. Save slots and the journal stay in Balatro's save folder.
@@ -135,7 +135,10 @@ down to the RNG state afterwards. The findings behind this are in the [journal](
 
 - **Balatro** 1.0.1o (Steam).
 - **Loader:** [lovely](https://github.com/ethangreen-dev/lovely-injector) 0.9 or newer (tested with 0.9.0). Steamodded is not needed.
-  Running alongside Steamodded hasn't been tested yet: reports welcome.
+- **Steamodded:** works alongside it (tested with 26.829.0), and its Mods menu lists the suite.
+  - Steamodded picks bosses and builds shops its own way, so the Oracle previews tags, bosses and Vouchers only, with bosses marked unverified.
+  - The Seed Finder searches tag, boss and Voucher clauses only.
+- **Content mods** (mods that add cards to the pools, such as Pokermon): the Oracle and Seed Finder switch off and say why, because their predictions wouldn't apply.
 - **OS:** the Windows build, tested under Proton on Linux. macOS is untested.
 
 ## FAQ

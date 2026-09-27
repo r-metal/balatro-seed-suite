@@ -198,11 +198,15 @@ local function run_key()
   return G.GAME.pseudorandom.seed..'|'..tostring(G.GAME.stake or 1)..'|'..deck_key()
 end
 
+-- Under Steamodded, predicting a card runs its scoring hooks, which expect the live run
+-- (and could touch its Jokers), so only tags, bosses and vouchers are predicted.
+local function cards_ok() return not BHCore.env().smods end
+
 local function stable_plan(antes)
   local key = run_key()
   if stable and stable.key == key and stable.antes >= antes then return stable.plan end
   local S = state.fresh(G.GAME.pseudorandom.seed, {stake = G.GAME.stake or 1, deck = deck_key()})
-  local plan = predict.plan(S, {antes = antes, shops_per_ante = 1, open_packs = false})
+  local plan = predict.plan(S, {antes = antes, shops_per_ante = 1, open_packs = false, cards = cards_ok()})
   if not (stable and stable.key == key) then boss_moved = false end
   stable = {key = key, antes = antes, plan = plan}
   M.stats.stable_plans = M.stats.stable_plans + 1
@@ -229,14 +233,17 @@ local function stable_rec(plan, a, A)
     local tags = rr.blind_tags or {}
     rec.tags = {small = live_item(tags.Small, p.tags.small), big = live_item(tags.Big, p.tags.big)}
     rec.boss = live_item(rr.blind_choices and rr.blind_choices.Boss, p.boss)
+    -- Steamodded re-picks bosses with its own weights (SMODS.reset_blind_choices), so a
+    -- live boss that differs is its pick, not something the run changed.
+    if not cards_ok() and rec.boss.badge == 'changed' then rec.boss.badge = 'stable' end
     if rec.boss.badge == 'changed' then boss_moved = true end
-    rec.voucher = live_item(G.GAME.current_round and G.GAME.current_round.voucher, p.voucher)
+    rec.voucher = live_item(BHCore.round_voucher(), p.voucher)
   else
     rec.tags = {small = item(p.tags.small, 'stable'), big = item(p.tags.big, 'stable')}
-    rec.boss = item(p.boss, boss_moved and 'conditional' or 'stable')
+    rec.boss = item(p.boss, not cards_ok() and 'unverified' or boss_moved and 'conditional' or 'stable')
     rec.voucher = item(p.voucher, owns_voucher() and 'conditional' or 'stable')
   end
-  rec.soul = {key = p.soul and p.soul.key, edition = p.soul and p.soul.edition, badge = 'stable'}
+  rec.soul = p.soul and {key = p.soul.key, edition = p.soul.edition, badge = 'stable'} or nil
   return rec
 end
 
@@ -317,11 +324,19 @@ local function conditional(recs, A)
 end
 
 local function compute()
+  if #BHCore.env().content > 0 then
+    return {off = 'Other mods add cards to this game\'s pools, so the Oracle can\'t predict it.', antes = {},
+      seed = G.GAME.pseudorandom.seed}
+  end
   local A = G.GAME.round_resets.ante
   local plan = stable_plan(math.max(M.MIN_PLAN, A + M.TABS - 1))
   local out = {seed = G.GAME.pseudorandom.seed, stake = G.GAME.stake or 1, deck = deck_key(), ante = A, antes = {}}
   for a = A, A + M.TABS - 1 do out.antes[#out.antes + 1] = stable_rec(plan, a, A) end
-  conditional(out.antes, A)
+  if cards_ok() then
+    conditional(out.antes, A)
+  else
+    for _, rec in ipairs(out.antes) do rec.shop_note = 'Shops and packs aren\'t previewed under Steamodded' end
+  end
   return out
 end
 
@@ -534,7 +549,7 @@ local function whatif_compute(a, c)
 end
 
 function M.whatif(a)
-  if not in_run() or in_sim() then return nil end
+  if not in_run() or in_sim() or not cards_ok() then return nil end
   if a < G.GAME.round_resets.ante then return nil end
   local c = M.choice(a)
   if is_default(c) and not earlier_skips(a) then return nil end
@@ -805,7 +820,8 @@ end
 local function install_detector()
   events.on('run_start', function()
     broke = nil
-    new_track()
+    -- The detector predicts shops and packs, which Steamodded games don't get.
+    if cards_ok() then new_track() else track = nil end
   end)
   events.on('ante_change', function() broke = nil end)
   events.on('shop_enter', function()

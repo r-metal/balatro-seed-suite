@@ -10,7 +10,7 @@ VERSION = $(shell python3 scripts/release.py version)
 MODS := $(notdir $(patsubst %/lovely.toml,%,$(wildcard mods/*/lovely.toml)))
 LUA_SRC := $(wildcard mods/*/src/*.lua mods/*/src/*/*.lua) $(wildcard tests/*.lua) $(wildcard rig/*.lua rig/scenarios/*.lua)
 
-.PHONY: check lint unit native smoke smoke-dist game-src clear-installed install install-zip uninstall dist notes export clean
+.PHONY: check lint unit native smoke smoke-dist lovely-smoke lovely-check game-src clear-installed install install-zip uninstall dist notes export clean
 
 # Tests run at low CPU priority so a game being played keeps its frame rate.
 NICE ?= nice -n 15
@@ -47,6 +47,19 @@ smoke-dist: dist game-src
 	@rm -rf build/dist-check && mkdir -p build/dist-check
 	@unzip -q dist/$(VERSION)/BalatroSeedSuite.zip -d build/dist-check
 	@for s in $(SMOKE_DIST); do MODS_ROOT=$(CURDIR)/build/dist-check rig/smoke.sh $$s || exit 1; done
+
+# The real game with the real lovely (its Linux build) in a throwaway Mods dir, with the
+# release zip and, for compatibility, Steamodded (a copy in tools/smods-*/) and other
+# mods (rig/lovely-rig.sh). lovely-check is the compatibility matrix; the content-mod
+# case runs when tools/pokermon/ holds a copy of Pokermon.
+lovely-smoke: dist game-src
+	@rig/lovely-rig.sh $(S) $(if $(SMODS),--smods)
+
+LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods
+lovely-check: dist game-src
+	@fail=0; for e in $(LOVELY_MATRIX); do rig/lovely-rig.sh $${e%%:*} $${e#*:} || fail=1; done; \
+	  if [ -d tools/pokermon ]; then rig/lovely-rig.sh lovely_content_mod --smods --mod tools/pokermon || fail=1; \
+	  else echo "lovely-check: no tools/pokermon, content-mod case skipped"; fi; exit $$fail
 
 # Every layout the suite can be installed in: the dev copies (one folder per mod) and
 # the release bundle (folder or zip). Each install target clears all of them first,

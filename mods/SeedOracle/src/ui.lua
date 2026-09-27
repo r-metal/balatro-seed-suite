@@ -71,6 +71,7 @@ local BADGES = {
   conditional = {'if...', 'ORANGE'},
   unrerolled = {'if opened before rerolling', 'ORANGE'},
   changed = {'changed in this run', 'RED'},
+  unverified = {'unverified', 'ORANGE'},  -- Steamodded picks bosses its own way
 }
 local NOTE = 'if...: if nothing else consumes the stream first'
 
@@ -246,8 +247,13 @@ local function stable_box(label, object, name, kind, extra)
 end
 
 local function stable_row(rec, track)
-  local soul_name = rec.soul.key and loc_name('Joker', rec.soul.key) or '?'
-  if rec.soul.edition then soul_name = soul_name..' ('..rec.soul.edition..')' end
+  local soul_box
+  if rec.soul then  -- not predicted under Steamodded (oracle.lua cards_ok)
+    local soul_name = rec.soul.key and loc_name('Joker', rec.soul.key) or '?'
+    if rec.soul.edition then soul_name = soul_name..' ('..rec.soul.edition..')' end
+    soul_box = stable_box('The Soul makes', card_row({{key = rec.soul.key, edition = rec.soul.edition}}, 1, 'soul', rec.ante, track),
+      soul_name, rec.soul.badge)
+  end
   return row({
     stable_box('Small Blind tag', tag_sprite(rec.tags.small.key, 'small', track), loc_name('Tag', rec.tags.small.key), rec.tags.small.badge),
     stable_box('Big Blind tag', tag_sprite(rec.tags.big.key, 'big', track), loc_name('Tag', rec.tags.big.key), rec.tags.big.badge),
@@ -255,8 +261,7 @@ local function stable_row(rec, track)
       boss_desc(rec.boss.key)),
     stable_box('Voucher', card_row({{key = rec.voucher.key}}, 1, 'voucher', rec.ante, track),
       loc_name('Voucher', rec.voucher.key), rec.voucher.badge),
-    stable_box('The Soul makes', card_row({{key = rec.soul.key, edition = rec.soul.edition}}, 1, 'soul', rec.ante, track),
-      soul_name, rec.soul.badge),
+    soul_box,
   }, {padding = 0.06})
 end
 
@@ -447,6 +452,7 @@ local function tab_root(ante)
   chosen = ante
   local model = oracle.get()
   local rec = find_rec(model, ante)
+  if model and model.off then return message_root(model.off) end
   if model and model.error then return message_root('The Oracle could not predict this run: '..model.error) end
   if not rec then return message_root('Ante '..tostring(ante)..' is behind the run now: reopen the Oracle') end
   local wi = oracle.whatif(ante)
@@ -456,10 +462,8 @@ local function tab_root(ante)
     local cond = wi and whatif_rows(rec, wi, track) or shop_rows(rec, track)
     return {n=G.UIT.ROOT, config={align = 'cm', colour = G.C.CLEAR, padding = 0.02}, nodes = {
       stable_row(rec, track),
-      row({
-        whatif_controls(ante),
-        {n=G.UIT.C, config={align = 'cm'}, nodes = cond},
-      }),
+      row(rec.soul and {whatif_controls(ante), {n=G.UIT.C, config={align = 'cm'}, nodes = cond}}
+        or {{n=G.UIT.C, config={align = 'cm'}, nodes = cond}}),  -- no what-if without shop predictions
     }}
   end)
   if ok then return res end
@@ -494,7 +498,7 @@ local function overlay_def(model)
   end
   if #tabs == 0 then
     tabs[1] = {label = 'Oracle', chosen = true, tab_definition_function = message_root,
-      tab_definition_function_args = model.error or 'Nothing to predict'}
+      tab_definition_function_args = model.off or model.error or 'Nothing to predict'}
   end
   local found = false
   for _, t in ipairs(tabs) do found = found or t.chosen end
@@ -505,11 +509,14 @@ local function overlay_def(model)
       text('   '..localize('b_seed')..': '..tostring(model.seed), 0.4, G.C.FILTER),
     }, {id = ROOT_ID, padding = 0.02}),
   }
+  -- Under Steamodded or content mods, say what the predictions can't be trusted for.
+  local notice = BHCore.env_notice()
+  if notice then contents[#contents + 1] = row({text(notice, 0.3, G.C.ORANGE)}, {padding = 0.02}) end
   local banner = divergence_banner()
   if banner then contents[#contents + 1] = banner end
   contents[#contents + 1] = row({create_tabs{tabs = tabs, snap_to_nav = true, scale = 0.9, text_scale = 0.4,
     colour = G.C.BOOSTER}})
-  contents[#contents + 1] = row({text(NOTE, 0.28, G.C.UI.TEXT_LIGHT)})
+  if not model.off then contents[#contents + 1] = row({text(NOTE, 0.28, G.C.UI.TEXT_LIGHT)}) end
   return create_UIBox_generic_options{
     back_func = from_pause and 'options' or 'exit_overlay_menu',
     padding = 0.05,

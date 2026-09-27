@@ -47,7 +47,7 @@ local function compare_ante(ctx, seed, a)
   local p, rr = pred[seed].antes[a], G.GAME.round_resets
   ctx.assert(rr.ante == a, seed..': live ante is '..tostring(rr.ante)..', expected '..a)
   local real = {small = rr.blind_tags.Small, big = rr.blind_tags.Big,
-    boss = rr.blind_choices.Boss, voucher = G.GAME.current_round.voucher}
+    boss = rr.blind_choices.Boss, voucher = BHCore.round_voucher()}
   ctx.log(string.format('%s ante %d: predicted %s/%s boss %s voucher %s; real %s/%s boss %s voucher %s',
     seed, a, p.small, p.big, p.boss, p.voucher, real.small, real.big, real.boss, real.voucher))
   for _, f in ipairs{'small', 'big', 'boss', 'voucher'} do

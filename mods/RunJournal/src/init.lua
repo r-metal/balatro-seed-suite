@@ -3,7 +3,7 @@ if RunJournal then return RunJournal end
 
 require('bhcore.init')
 
-RunJournal = {VERSION = '0.3.0'}
+RunJournal = {VERSION = '0.3.1'}
 RunJournal.recorder = require('runjournal.recorder')
 RunJournal.stats = require('runjournal.stats')
 RunJournal.ui = require('runjournal.ui')

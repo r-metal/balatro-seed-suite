@@ -35,7 +35,8 @@
 --                  STOP_EVERY seeds; the thread then waits for 'quit'.
 --
 -- What the thread runs (T-104's design, now with the real sim):
---   * vanilla's own files, unmodified, through love.filesystem.load (PhysFS is
+--   * vanilla's own files, unmodified (read, then loaded under a name lovely never
+--     patches, so no other mod's version of them runs here; PhysFS is
 --     shared with threads): the class base, STR_PACK, Event, the RNG and pool
 --     primitives, Back and Card (the voucher decks' Card.apply_to_run).
 --   * bh-core's sim modules and seedfinder.filter as the SAME module files the
@@ -125,8 +126,14 @@ local filter, f, seed_at
 
 local function init(msg)
   local t0 = love.timer.getTime()
+  -- Vanilla's own code, never another mod's version of it. lovely patches a chunk
+  -- only when its name is a patch target ('functions/common_events.lua'), so the
+  -- files are read as bytes and loaded under a name no mod targets. A Steamodded-
+  -- patched copy would need SMODS, which a worker thread doesn't have.
   for _, path in ipairs(msg.vanilla) do
-    local chunk, err = love.filesystem.load(path)
+    local src, rerr = love.filesystem.read(path)
+    if not src then error('read '..path..': '..tostring(rerr), 0) end
+    local chunk, err = loadstring(src, '@vanilla/'..path)
     if not chunk then error('load '..path..': '..tostring(err), 0) end
     chunk()
   end

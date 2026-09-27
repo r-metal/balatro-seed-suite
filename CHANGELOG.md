@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 — 2026-09-26
+
+Works alongside other mods.
+
+### Fixes
+- **The Seed Finder could not search whenever Steamodded was installed.** It failed with "Search failed: … attempt to index global 'SMODS'". The search threads now run the game's own code, not another mod's patched copy of it.
+- Search and Odds failures show a short, readable message. The full error goes to the lovely log.
+- Save Slots practice scenarios set the round's Voucher the way Steamodded's shop expects.
+
+### With other mods
+- **Steamodded** lists the suite in its Mods menu as "Balatro Seed Suite" by r-metal.
+- **Under Steamodded**, the Oracle shows tags, bosses and Vouchers. Bosses are marked unverified, because Steamodded picks them its own way. Shops, packs and The Soul aren't previewed, and the Finder searches tag, boss and Voucher clauses only. A note in both says so.
+- **With content mods**, meaning mods that add cards to the pools such as Pokermon, the Oracle and Finder switch off and say why, instead of showing predictions that don't apply.
+
+### Under the hood
+- A second test rig runs the real lovely (its Linux build) with Steamodded and Pokermon: `make lovely-check`.
+
 ## 0.3.0 — 2026-09-26
 
 The first public release. The suite installs as a single lovely mod: put `BalatroSeedSuite.zip` into `Mods/` (no unzipping), or unzip it there as one `BalatroSeedSuite/` folder.

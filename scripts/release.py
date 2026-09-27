@@ -23,6 +23,7 @@ relative Markdown link to a file that is not exported, is left.
 """
 import fnmatch
 import hashlib
+import json
 import io
 import os
 import re
@@ -117,7 +118,32 @@ def bundle_entries():
         entries.append((f'{SUITE}/lovely/{m}.toml', toml.encode()))
     with open(os.path.join(ROOT, 'LICENSE'), 'rb') as f:
         entries.append((f'{SUITE}/LICENSE', f.read()))
+    entries += steamodded_entries()
     return entries
+
+
+def steamodded_entries():
+    """metadata.json and its no-op main file, so Steamodded's Mods menu lists the suite
+    by name (without them it shows a 'lovely-compat' stub). lovely ignores both."""
+    meta = {
+        'id': SUITE,
+        'name': 'Balatro Seed Suite',
+        'display_name': 'Seed Suite',
+        'author': ['r-metal'],
+        'description': 'Seed Finder, Seed Oracle, Save Slots and Run Journal. A Lovely mod that works '
+                       'with or without Steamodded. Under Steamodded, bosses and shops are unverified; '
+                       'content mods switch the predictions off.',
+        'prefix': 'bss',
+        'main_file': 'steamodded.lua',
+        'version': version(),
+        'badge_colour': 'D8432F',
+        'badge_text_colour': 'FFFFFF',
+        'dependencies': ['Lovely (>=0.9)'],
+    }
+    main = (b'-- Balatro Seed Suite is a lovely mod: lovely loads its code (lovely/*.toml).\n'
+            b'-- Steamodded runs this file only because metadata.json names it; it does nothing.\n')
+    return [(f'{SUITE}/metadata.json', (json.dumps(meta, indent=2) + '\n').encode()),
+            (f'{SUITE}/steamodded.lua', main)]
 
 
 def write_zip(path, entries):

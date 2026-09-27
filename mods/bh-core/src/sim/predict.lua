@@ -418,6 +418,7 @@ function M.plan(S, opts)
   local per = opts.shops_per_ante or 3
   local rerolls = opts.rerolls or 0
   local open = opts.open_packs ~= false
+  local cards = opts.cards ~= false  -- false: tags, boss and voucher only, nothing that makes a card
   assert(type(antes) == 'number' and antes >= 1 and antes % 1 == 0, 'predict.plan: bad antes '..tostring(antes))
   assert(type(per) == 'number' and per >= 1 and per <= 3 and per % 1 == 0, 'predict.plan: shops_per_ante is 1..3')
   assert(type(rerolls) == 'number' and rerolls >= 0 and rerolls % 1 == 0, 'predict.plan: bad rerolls')
@@ -440,13 +441,15 @@ function M.plan(S, opts)
     tags.certainty = forced_tags and 'conditional' or 'stable'
     rec.tags = tags
 
-    local soul_S = state.copy(S)
-    soul_S.game.round_resets.ante = a
-    rec.soul = M.legendaries(soul_S, 1)[1]
-    rec.soul.certainty = 'stable'
+    if cards then
+      local soul_S = state.copy(S)
+      soul_S.game.round_resets.ante = a
+      rec.soul = M.legendaries(soul_S, 1)[1]
+      rec.soul.certainty = 'stable'
+    end
 
     local pack_i = 0
-    for s = 1, math.min(per, a == 1 and 2 or 3) do
+    for s = 1, cards and math.min(per, a == 1 and 2 or 3) or 0 do
       local shop = {cards = M.shop(S, a), rerolls = {}, certainty = 'conditional'}
       shop.packs = M.packs(S, a, 2)
       for r = 1, rerolls do shop.rerolls[r] = {cards = M.reroll(S, a)} end

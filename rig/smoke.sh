@@ -100,7 +100,7 @@ names=()
 for f in "$ROOT"/rig/scenarios/*.lua; do
   [ -e "$f" ] || continue
   n="$(basename "$f" .lua)"
-  case "$n" in selftest_*) continue ;; esac
+  case "$n" in selftest_*|lovely_*) continue ;; esac  # lovely_*: rig/lovely-rig.sh only
   names+=("$n")
 done
 [ ${#names[@]} -gt 0 ] || die all "no scenarios in rig/scenarios"

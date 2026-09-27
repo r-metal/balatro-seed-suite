@@ -3,7 +3,7 @@ if SeedOracle then return SeedOracle end
 
 require('bhcore.init')
 
-SeedOracle = {VERSION = '0.3.0'}
+SeedOracle = {VERSION = '0.3.1'}
 SeedOracle.oracle = require('seedoracle.oracle')
 SeedOracle.ui = require('seedoracle.ui')
 

@@ -486,6 +486,30 @@ end
 
 local function status(msg) live.status = msg or '' end
 
+-- A failure for the status line, which shrinks long text to fit: the message alone,
+-- without the chunk names in front of it. The full text goes to the lovely log.
+local function brief(what, err)
+  err = tostring(err)
+  print('[SeedFinder] '..what..': '..err)
+  local msg = err:match(':%d+: ([^:]+)$') or err
+  if #msg > 48 then msg = msg:sub(1, 45)..'...' end
+  return what..': '..msg
+end
+
+-- Searching needs the pools the game really uses; content mods change them. Under
+-- Steamodded, a clause that makes a card (shop Jokers, packs, The Soul) would run its
+-- scoring hooks, so only tag, boss and voucher clauses are searched.
+local NO_CARDS = {tag = true, boss = true, voucher = true}
+local function blocked()
+  local e = BHCore.env()
+  if #e.content > 0 then return 'Searching is off in this game' end
+  if e.smods then
+    for _, c in ipairs(M.current().clauses or {}) do
+      if not NO_CARDS[c.kind] then return 'Under Steamodded: tag, boss and voucher clauses only' end
+    end
+  end
+end
+
 local tick
 
 local function ensure_ticker()
@@ -551,7 +575,7 @@ local function finish_search(p)
   handle = nil
   if p and p.error then
     search.error = tostring(p.error)
-    status('Search failed: '..search.error)
+    status(brief('Search failed', search.error))
   elseif #search.found >= MAX_HITS then
     status('Stopped at '..MAX_HITS..' hits')
   elseif search.cancelled then
@@ -607,7 +631,7 @@ end
 
 -- What the Odds lines say for job.
 local function odds_lines(job)
-  if job.err then return {'Odds failed: '..job.err} end
+  if job.err then return {job.err} end
   if not job.done then return {'Sampling '..commas(job.n)..' seeds...'} end
   local est = job.estimate
   if not est then return {'No odds: the sample was cut short'} end
@@ -642,7 +666,7 @@ local function poll_odds()
   if not ok then p = {error = p, done = true} end
   job.counts = p.counts or job.counts
   if p.error then
-    job.err = tostring(p.error)
+    job.err = brief('Odds failed', p.error)
     pcall(engine.cancel, job.handle)
   end
   if p.done or p.error then
@@ -656,11 +680,12 @@ end
 
 local function start_odds()
   if odds_job and not odds_job.done then return end
+  if blocked() then status(blocked()); return end
   local f = copy(M.current())
   local ok, err = filter.validate(f)
   if not ok then status(#f.clauses == 0 and 'Add a clause first' or tostring(err)); return end
   local ok2, h = pcall(engine.sample, f, ODDS_SAMPLE, {workers = workers or default_workers()})
-  if not ok2 then status('Could not sample: '..tostring(h)); return end
+  if not ok2 then status(brief('Could not sample', h)); return end
   odds_job = {filter = f, n = ODDS_SAMPLE, done = false, handle = h, sample = h, rate = 0}
   odds_job.lines = odds_lines(odds_job)
   dirty.odds = true
@@ -1031,7 +1056,7 @@ end
 local function search_panel()
   workers = workers or default_workers()
   local wl, wv = worker_options()
-  return panel('Search', SEARCH_W, {
+  local nodes = {
     row({
       cycle('workers', wl, wv, workers, function(v) workers = v end, {w = 1.7}),
       button('Start', 'seedfinder_start', {w = 1.05, colour = G.C.GREEN, func = 'seedfinder_can_start'}),
@@ -1052,7 +1077,14 @@ local function search_panel()
       config = {offset = {x = 0, y = 0}, align = 'cm'}}}}}),
     row({{n=G.UIT.O, config={id = 'seedfinder_results', object = UIBox{definition = results_def(),
       config = {offset = {x = 0, y = 0}, align = 'cm'}}}}}),
-  })
+  }
+  -- Under Steamodded or content mods, say what the results can't be trusted for.
+  local notice = BHCore.env_notice()
+  if notice then
+    table.insert(nodes, 4, row({text(notice, 0.26, G.C.ORANGE, 'seedfinder_env')},
+      {padding = 0.02, maxw = SEARCH_W - 0.4}))
+  end
+  return panel('Search', SEARCH_W, nodes)
 end
 
 local function overlay_def()
@@ -1090,11 +1122,12 @@ function M.hunt() return hunt end
 
 local function start_search()
   if handle then return end
+  if blocked() then status(blocked()); return end
   local f = copy(M.current())
   local ok, err = filter.validate(f)
   if not ok then status(#f.clauses == 0 and 'Add a clause first' or tostring(err)); return end
   local ok2, h = pcall(engine.start, f, {workers = workers or default_workers(), stop_after = MAX_HITS})
-  if not ok2 then status('Could not start: '..tostring(h)); return end
+  if not ok2 then status(brief('Could not start', h)); return end
   handle = h
   search = {filter = f, found = {}, scanned = 0, rate = 0, running = true, handle = h}
   page = 1

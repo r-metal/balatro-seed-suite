@@ -246,7 +246,7 @@ local function apply(c)
     ease_ante(c.ante - 1)
     rr.blind_ante = c.ante
     G.E_MANAGER:add_event(Event({trigger = 'immediate', func = function()
-      G.GAME.current_round.voucher = get_next_voucher_key()
+      BHCore.roll_round_voucher()
       rr.blind_tags.Small = get_next_tag_key()
       rr.blind_tags.Big = get_next_tag_key()
       rr.blind_choices.Boss = get_new_boss()

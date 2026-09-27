@@ -38,7 +38,13 @@ make install-zip  # install exactly what users download: the zip into Mods/ (LAY
 make uninstall    # remove every installed layout (saves and journals are kept)
 make dist         # dist/<version>/: BalatroSeedSuite.zip, SHA256SUMS
 make smoke-dist   # boot the rig from the extracted release bundle instead of mods/
+make lovely-check # the real lovely (Linux build) with the release zip, Steamodded and Pokermon
 ```
+
+`make smoke` emulates lovely, so it only proves the suite against the unmodded game. `make lovely-check`
+runs the real game under the real lovely injector, in a throwaway Mods folder, next to other mods. For that it
+needs a Steamodded copy in `tools/smods-<version>/` and, for the content-mod case, Pokermon in `tools/pokermon/`.
+Scenarios named `lovely_*` only run there.
 
 `make check` runs at low CPU priority (`nice -n 15`), so a game you are playing keeps its frame rate. It must pass
 before any change is merged.
@@ -55,7 +61,7 @@ before any change is merged.
 ## Releasing
 
 1. Update the versions and write the `## X.Y.Z — date` section of `CHANGELOG.md`.
-2. `make check`, then `make smoke-dist`.
+2. `make check`, `make smoke-dist` and `make lovely-check`.
 3. Install with `make install-zip`, then play the real game once with each mod.
 4. Tag `vX.Y.Z`, then publish `dist/X.Y.Z/*` as the GitHub Release, with `make notes` as the body. The asset name
    stays `BalatroSeedSuite.zip`, so `releases/latest/download/BalatroSeedSuite.zip` always points at the newest release.

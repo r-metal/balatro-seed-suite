@@ -89,7 +89,7 @@ local function real_rec(c)
     for k, v in pairs(G.P_CARDS) do P_CARD_KEY[v] = k end
   end
   local set = c.config.center.set
-  return {key = c.config.center.key, edition = c.edition and c.edition.type or nil,
+  return {key = c.config.center.key, edition = not SMODS and c.edition and c.edition.type or nil,
     eternal = c.ability.eternal and true or false, perishable = c.ability.perishable and true or false,
     rental = c.ability.rental and true or false, seal = c.seal,
     front = (set == 'Default' or set == 'Enhanced') and P_CARD_KEY[c.config.card] or nil}
@@ -97,7 +97,9 @@ end
 
 local function pred_rec(p)
   local s = p.stickers or {}
-  return {key = p.key, edition = p.edition, eternal = s.eternal and true or false,
+  -- Under Steamodded (rig/lovely-rig.sh --smods) editions are rolled its own way, so the
+  -- comparison is of which card appears; journal 2026-09-26-steamodded-compat.
+  return {key = p.key, edition = not SMODS and p.edition or nil, eternal = s.eternal and true or false,
     perishable = s.perishable and true or false, rental = s.rental and true or false,
     seal = p.seal, front = p.front}
 end
@@ -167,6 +169,8 @@ local function in_pack_state()
   if not PACK_STATES then
     PACK_STATES = {[G.STATES.TAROT_PACK] = true, [G.STATES.PLANET_PACK] = true,
       [G.STATES.SPECTRAL_PACK] = true, [G.STATES.STANDARD_PACK] = true, [G.STATES.BUFFOON_PACK] = true}
+    -- Steamodded opens every pack in its own state (rig/lovely-rig.sh --smods).
+    if G.STATES.SMODS_BOOSTER_OPENED then PACK_STATES[G.STATES.SMODS_BOOSTER_OPENED] = true end
   end
   return PACK_STATES[G.STATE]
 end
@@ -227,7 +231,10 @@ local function play_seed(ctx)
     P.tag_seen[P.ante] = (P.tag_seen[P.ante] or 0) + 1
     -- The tag's pack card is not kept anywhere: its kind shows in the state.
     local want_state = G.STATES[PACK_STATE[G.P_CENTERS[tp.pack].kind]]
-    ctx.assert(G.STATE == want_state and G.GAME.pack_size == #tp.cards, seed..': the tag pack is not a '..tp.pack)
+    ctx.assert((G.STATE == want_state or G.STATE == G.STATES.SMODS_BOOSTER_OPENED)
+      and (G.GAME.pack_size == #tp.cards or #G.pack_cards.cards == #tp.cards),  -- Steamodded reuses pack_size
+      seed..': the tag pack is not a '..tp.pack..' (state '..tostring(G.STATE)..', pack_size '..tostring(G.GAME.pack_size)
+      ..', predicted '..#tp.cards..' cards, shown '..#G.pack_cards.cards..')')
     if SHOTS[seed] and not P.tag_shot then P.tag_shot = true; ctx.shot('tag_pack') end
     compare_cards(ctx, seed, 'ante '..P.ante..' '..P.skipped..' tag pack ('..tp.pack..')', tp.cards, G.pack_cards.cards)
     P.after_close = 'blind'

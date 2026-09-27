@@ -96,8 +96,25 @@ local function plain(v, onpath)
   return out
 end
 
+-- A prototype table: its own plain fields. Steamodded turns prototypes into objects of
+-- its classes (with metatables), which plain() would drop whole, taking the Booster
+-- pool with them; their own fields (key, set, config, kind, weight...) are plain data.
+local function protos(map)
+  local out = {}
+  for k, v in pairs(map or {}) do
+    if type(k) == 'string' and type(v) == 'table' then
+      local o = {}
+      for f, x in pairs(v) do
+        if type(f) == 'string' or type(f) == 'number' then o[f] = plain(x, {[v] = true}) end
+      end
+      out[k] = o
+    end
+  end
+  return out
+end
+
 function M.projection()
-  local d = {centers = plain(G.P_CENTERS, {}), tags = plain(G.P_TAGS, {}), blinds = plain(G.P_BLINDS, {}),
+  local d = {centers = protos(G.P_CENTERS), tags = protos(G.P_TAGS), blinds = protos(G.P_BLINDS),
     cards = plain(G.P_CARDS, {}), handlist = plain(G.handlist or {}, {}),
     template = plain(Game.init_game_object(G), {}), pools = {}, rarity = {}}
   local function keys(list)

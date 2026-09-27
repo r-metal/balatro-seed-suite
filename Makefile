@@ -55,9 +55,10 @@ smoke-dist: dist game-src
 lovely-smoke: dist game-src
 	@rig/lovely-rig.sh $(S) $(if $(SMODS),--smods)
 
-LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods
+LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods \
+  lovely_paused_sim:--smods golden_stable:--smods golden_walk:--smods golden_tagpacks:--smods
 lovely-check: dist game-src
-	@fail=0; for e in $(LOVELY_MATRIX); do rig/lovely-rig.sh $${e%%:*} $${e#*:} || fail=1; done; \
+	@export SMOKE_TIMEOUT=$${SMOKE_TIMEOUT:-600}; fail=0; for e in $(LOVELY_MATRIX); do rig/lovely-rig.sh $${e%%:*} $${e#*:} || fail=1; done; \
 	  if [ -d tools/pokermon ]; then rig/lovely-rig.sh lovely_content_mod --smods --mod tools/pokermon || fail=1; \
 	  else echo "lovely-check: no tools/pokermon, content-mod case skipped"; fi; exit $$fail
 

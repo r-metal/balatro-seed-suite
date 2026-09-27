@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 — 2026-09-26
+
+The Seed Finder and Oracle do much more under Steamodded, now that their predictions were checked against the real Steamodded game.
+
+- **Fix: under Steamodded, every prediction made while the Oracle or Seed Finder was open was random.** Steamodded makes the game's seeded RNG return random numbers while the game is paused, and both windows pause it. So the Oracle showed wrong tags, bosses and Vouchers, and the Finder rejected every correct hit ("14 of 14 found hits failed the check"). The predictions now run unpaused.
+
+- **Under Steamodded, the Finder searches card clauses** (shop Jokers, packs, the Soul in a pack, which legendary the Soul makes), not only tags and Vouchers. Boss clauses and edition requirements are still left out.
+- **Under Steamodded, the Oracle previews shops, packs and The Soul again.** Editions are left out and later bosses are marked unverified, because Steamodded rolls editions and picks bosses its own way.
+- Fix: under Steamodded, Finder searches that involve packs failed with "not a pack". The search threads lost the booster packs, because Steamodded turns them into objects of its own classes.
+- The Finder says how many found hits failed its check, and each search leaves a summary line in the lovely log.
+- Under the hood: 255 predictions checked against the real Steamodded game (20 Soul legendaries, 83 pack contents, 68 shop rows and rerolls, plus tags and Vouchers) all matched on which card appears. `make lovely-check` now runs these golden suites under Steamodded.
+
 ## 0.3.1 — 2026-09-26
 
 Works alongside other mods.

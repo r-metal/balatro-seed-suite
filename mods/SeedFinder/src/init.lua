@@ -3,7 +3,7 @@ if SeedFinder then return SeedFinder end
 
 require('bhcore.init')
 
-SeedFinder = {VERSION = '0.3.1'}
+SeedFinder = {VERSION = '0.3.2'}
 SeedFinder.filter = require('seedfinder.filter')
 SeedFinder.engine = require('seedfinder.engine')
 SeedFinder.worker = require('seedfinder.worker')

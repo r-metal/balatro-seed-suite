@@ -497,15 +497,15 @@ local function brief(what, err)
 end
 
 -- Searching needs the pools the game really uses; content mods change them. Under
--- Steamodded, a clause that makes a card (shop Jokers, packs, The Soul) would run its
--- scoring hooks, so only tag, boss and voucher clauses are searched.
-local NO_CARDS = {tag = true, boss = true, voucher = true}
+-- Steamodded, which card appears matches vanilla but bosses and editions don't (golden
+-- suites under rig/lovely-rig.sh --smods), so boss clauses and edition requirements
+-- are left out.
 local function blocked()
   local e = BHCore.env()
   if #e.content > 0 then return 'Searching is off in this game' end
   if e.smods then
     for _, c in ipairs(M.current().clauses or {}) do
-      if not NO_CARDS[c.kind] then return 'Under Steamodded: tag, boss and voucher clauses only' end
+      if c.kind == 'boss' or c.edition then return 'Under Steamodded: no boss or edition clauses' end
     end
   end
 end
@@ -573,6 +573,11 @@ end
 local function finish_search(p)
   search.running = false
   handle = nil
+  -- One line in the lovely log per search, so a report can say where hits went: found by
+  -- the worker threads (candidates) and kept or rejected by the main-thread check.
+  print(('[SeedFinder] search ended: scanned %d, candidates %s, rejected %s, hits %d%s'):format(
+    search.scanned or 0, tostring(p and p.candidates), tostring(p and p.rejected), #search.found,
+    BHCore.env().smods and ' (Steamodded)' or ''))
   if p and p.error then
     search.error = tostring(p.error)
     status(brief('Search failed', search.error))
@@ -598,6 +603,10 @@ local function poll()
   end
   live.scanned = commas(search.scanned)
   live.rate = commas(search.rate)..'/s'
+  search.candidates, search.rejected = p.candidates, p.rejected
+  if not p.error and not p.done and (p.rejected or 0) > 0 then
+    status('Searching... '..commas(p.rejected)..' of '..commas(p.candidates or 0)..' found hits failed the check')
+  end
   live.hits = tostring(#search.found)
   if type(p.hits_per_million) == 'number' and (search.scanned or 0) > 0 then
     local h = p.hits_per_million

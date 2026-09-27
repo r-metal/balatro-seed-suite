@@ -4,7 +4,9 @@
 # throwaway Mods dir holding the release zip, optionally Steamodded, and the scenario
 # driver packaged as a lovely mod. It checks what the emulating rig (smoke.sh) can't:
 # the zip loaded by lovely itself, and the suite next to other mods' patches.
-# Usage: rig/lovely-rig.sh <scenario> [--smods] [--suite <zip or folder>] [--mod <dir>]...
+# Usage: rig/lovely-rig.sh <scenario> [--smods] [--suite <zip or folder>] [--mod <dir>]... [--profile <dir>]
+#   --profile: a profile folder whose meta.jkr and profile.jkr (unlocks, discoveries) the
+#   game loads as profile 1; copied into the throwaway save dir, never written back.
 #   (normally via `make lovely-smoke S=<name> [SMODS=1]`)
 # Output: `LOVELY PASS <name>` / `LOVELY FAIL <name>: <reason>`. Log: build/lovely-rig/<name>/.
 # Needs: tools/lovely-0.9.0/liblovely.so (fetched on first use), tools/love-11.5 (from
@@ -20,12 +22,13 @@ SMODS_DIR="${SMODS_DIR:-$(ls -d "$ROOT"/tools/smods-* 2>/dev/null | tail -1)}"
 WALL_TIMEOUT="${SMOKE_TIMEOUT:-180}"
 
 name="${1:-}"; shift || true
-smods=0; suite=""; extra=()
+smods=0; suite=""; extra=(); profile=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --smods) smods=1 ;;
     --suite) suite="$2"; shift ;;
     --mod) extra+=("$2"); shift ;;
+    --profile) profile="$2"; shift ;;
     *) echo "LOVELY FAIL $name: unknown option $1"; exit 1 ;;
   esac
   shift
@@ -52,6 +55,10 @@ rm -rf "$out" && mkdir -p "$out/home" "$out/Mods/zz-rig-driver"
 cp -r "$suite" "$out/Mods/"
 [ $smods = 0 ] || cp -r "$SMODS_DIR" "$out/Mods/smods"
 for m in "${extra[@]}"; do cp -r "$m" "$out/Mods/"; done
+if [ -n "$profile" ]; then
+  mkdir -p "$out/home/love/game/1"
+  for f in meta.jkr profile.jkr; do [ -f "$profile/$f" ] && cp "$profile/$f" "$out/home/love/game/1/"; done
+fi
 
 # The driver as a lovely mod: fail fast on load errors, then run the scenario at the
 # end of main.lua, exactly where the emulating rig appends it.

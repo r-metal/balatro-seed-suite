@@ -248,7 +248,7 @@ end
 
 local function stable_row(rec, track)
   local soul_box
-  if rec.soul then  -- not predicted under Steamodded (oracle.lua cards_ok)
+  if rec.soul then
     local soul_name = rec.soul.key and loc_name('Joker', rec.soul.key) or '?'
     if rec.soul.edition then soul_name = soul_name..' ('..rec.soul.edition..')' end
     soul_box = stable_box('The Soul makes', card_row({{key = rec.soul.key, edition = rec.soul.edition}}, 1, 'soul', rec.ante, track),

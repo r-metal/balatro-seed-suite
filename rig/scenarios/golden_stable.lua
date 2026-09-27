@@ -51,7 +51,10 @@ local function compare_ante(ctx, seed, a)
   ctx.log(string.format('%s ante %d: predicted %s/%s boss %s voucher %s; real %s/%s boss %s voucher %s',
     seed, a, p.small, p.big, p.boss, p.voucher, real.small, real.big, real.boss, real.voucher))
   for _, f in ipairs{'small', 'big', 'boss', 'voucher'} do
-    if type(real[f]) ~= 'string' or p[f] ~= real[f] then fail(ctx, seed, 'ante '..a..' '..f, p[f], real[f]) end
+    -- Steamodded picks bosses with its own weights; under it only the other fields are compared.
+    if not (SMODS and f == 'boss') and (type(real[f]) ~= 'string' or p[f] ~= real[f]) then
+      fail(ctx, seed, 'ante '..a..' '..f, p[f], real[f])
+    end
   end
   ctx.log('check: golden_stable '..seed..' ante '..a..' ok')
 end
@@ -129,7 +132,7 @@ local function soul_step(seed)
       ctx.log(string.format('%s soul %d: predicted %s (%s); real %s (%s)', seed, i,
         w.key, tostring(w.edition), g.key, tostring(g.edition)))
       if w.key ~= g.key then fail(ctx, seed, 'soul '..i..' joker', w.key, g.key) end
-      if w.edition ~= g.edition then fail(ctx, seed, 'soul '..i..' edition', w.edition, g.edition) end
+      if not SMODS and w.edition ~= g.edition then fail(ctx, seed, 'soul '..i..' edition', w.edition, g.edition) end
     end
     ctx.log('check: golden_stable '..seed..' souls ok')
     return true

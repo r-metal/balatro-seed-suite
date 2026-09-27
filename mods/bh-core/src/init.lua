@@ -1,7 +1,7 @@
 -- bh-core: shared library for the suite. Contracts: docs/bh-core.md.
 if BHCore then return BHCore end
 
-BHCore = {VERSION = '0.3.1'}
+BHCore = {VERSION = '0.3.2'}
 
 -- True when this bh-core serves a mod built for major.minor `want` ('0.3'). Before 1.0
 -- a minor release may change the contracts, so both parts must match.
@@ -24,8 +24,8 @@ end
 -- What else changes the game. Predictions are proven against the unmodded game only:
 --   smods    Steamodded is loaded. It picks bosses with its own weighted pools
 --            (lovely/weights.toml bypasses get_new_boss, SMODS.reset_blind_choices
---            re-picks at run start) and rewrites card creation, so bosses and shops
---            are unverified.
+--            re-picks at run start) and rolls editions its own way; which card
+--            appears matches vanilla (golden suites under rig/lovely-rig.sh --smods).
 --   content  names of mods that add or take over cards, tags, blinds or seals
 --            (Steamodded marks them with original_mod / mod). They change the pools,
 --            so predictions don't apply.
@@ -53,7 +53,7 @@ function BHCore.env_notice()
       or e.content[1]..' changes'
     return who..' the card pools: predictions don\'t apply'
   elseif e.smods then
-    return 'Steamodded: bosses and shops are unverified'
+    return 'Steamodded: editions and bosses are unverified'
   end
   return nil
 end

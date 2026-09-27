@@ -70,10 +70,21 @@ local function swap_areas(saved)
   -- menu would otherwise silently disable duplicate exclusion in every prediction.
   saved.OVERLAY_MENU = {G.OVERLAY_MENU}
   G.OVERLAY_MENU = nil
+  -- Likewise the pause: Steamodded's pseudoseed returns math.random() while
+  -- G.SETTINGS.paused (lovely/fixes.toml, "prng calls on collection advancing seeds"),
+  -- and every overlay pauses the game, so a simulation run under the Oracle or the
+  -- Finder would draw from an unseeded RNG. Vanilla never reads the flag here.
+  if G.SETTINGS then
+    saved.paused = G.SETTINGS.paused
+    G.SETTINGS.paused = false
+  end
 end
 
 local function restore_areas(saved)
+  local paused = saved.paused
+  saved.paused = nil
   for name, box in pairs(saved) do G[name] = box[1] end
+  if G.SETTINGS and paused ~= nil then G.SETTINGS.paused = paused end
 end
 
 local function flip_unlocks(saved)

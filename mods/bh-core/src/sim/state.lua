@@ -23,8 +23,9 @@
 --   hands/discards/reroll_cost, dollars and reroll costs from starting_params;
 --   chips_text; seeded = true; pseudorandom.seed; the zero-state rehash and
 --   hashed_seed (game.lua:2162-2168); round_resets.blind_tags = {}.
---   selected_back is "MANUAL_REPLACE" and selected_back_key a copy of the deck
---   center, exactly what capture() of a real run holds.
+--   selected_back is "MANUAL_REPLACE" and selected_back_key a plain-data copy
+--   of the deck center, what capture() of a vanilla run holds (functions,
+--   which Steamodded adds to some decks, are dropped).
 -- Not reproduced: anything the deck queues as an event (Magic Deck's Fools,
 --   and the rate/slot changes Zodiac, Magic and similar decks' vouchers apply
 --   through Card.apply_to_run's events). start_run's own first generation runs
@@ -95,6 +96,26 @@ local STAKE_RULES = {
   [8] = function(g) g.modifiers.enable_rentals_in_shop = true end,
 }
 
+-- The deck center as STR_UNPACK(STR_PACK(center)) would give it, minus what STR_PACK
+-- errors on. Steamodded's take_ownership (zodiac, painted, anaglyph, plasma, erratic)
+-- leaves functions such as inject among the center's own fields. Nested Objects become
+-- "MANUAL_REPLACE", as STR_PACK writes them; functions and cycles are dropped.
+local function packable(v, onpath)
+  local t = type(v)
+  if t == 'string' or t == 'number' or t == 'boolean' then return v end
+  if t ~= 'table' or onpath[v] then return nil end
+  onpath[v] = true
+  local out = {}
+  for k, x in pairs(v) do
+    local tk = type(k)
+    if tk == 'string' or tk == 'number' then
+      if is_object(x) then out[k] = 'MANUAL_REPLACE' else out[k] = packable(x, onpath) end
+    end
+  end
+  onpath[v] = nil
+  return out
+end
+
 -- A queue that drops everything: the deck's deferred work never reaches the game.
 local NULL_EVENTS = {add_event = function() end, clear_queue = function() end}
 
@@ -117,7 +138,7 @@ local function build(S, seed, stake, deck)
   g.stake = stake
   g.STOP_USE = 0
   g.selected_back = 'MANUAL_REPLACE'
-  g.selected_back_key = STR_UNPACK(STR_PACK(center))
+  g.selected_back_key = packable(center, {})
 
   for level = 2, stake do
     if STAKE_RULES[level] then STAKE_RULES[level](g) end

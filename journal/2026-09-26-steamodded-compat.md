@@ -44,6 +44,18 @@ Found by running the suite next to Steamodded 26.829.0 in the real-lovely rig
 - **Content mods mark what they add.** Steamodded sets `original_mod` on every prototype a
   mod adds, and `mod` on the vanilla ones a mod takes over. `BHCore.env()` reads those marks
   to tell a content mod (Pokermon) from Steamodded alone.
+- **Five vanilla decks carry a function (found 2026-09-28).** Steamodded takes ownership of
+  Zodiac, Painted, Anaglyph, Plasma and Erratic (`game_object.lua`, `stake_mod`) to set their
+  unlock stake, and `take_ownership` copies its table's fields onto the center, including an
+  `inject` function. `STR_PACK` errors on a function in a table's own fields (it only turns
+  nested Objects into `"MANUAL_REPLACE"`), so `state.fresh`'s `STR_UNPACK(STR_PACK(center))`
+  failed on those decks. It now makes a plain-data copy that drops functions.
+- **Cards need `ability.card_limit` (found 2026-09-28).** Steamodded's `set_ability` adds
+  `card_limit` and `extra_slots_used` to every card's `ability`, and its `set_edition`,
+  seal and enhancement code does arithmetic on them. A save made before Steamodded was
+  installed has neither, so the Save Slots preview, which copies the saved `ability` onto a
+  fresh card, failed on any card with an edition. Fields the save lacks now keep the fresh
+  card's value.
 - **Pack states.** Steamodded opens every pack in `G.STATES.SMODS_BOOSTER_OPENED` (999) and
   uses `G.GAME.pack_size` for the number of picks, so the golden scenarios accept that state
   and count the cards shown instead.

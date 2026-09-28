@@ -14,7 +14,8 @@
 -- Cards
 --   Built fresh from G.P_CENTERS[save_fields.center] with the bypass_discovery flags,
 --   then given a deep copy of the saved `ability` (so tooltips and eternal/perishable/
---   rental stickers match the save), the saved edition and `pinned`. Centers missing
+--   rental stickers match the save; fields the save lacks keep the fresh card's
+--   value), the saved edition and `pinned`. Centers missing
 --   from G.P_CENTERS (a removed mod) are skipped. Vouchers come from
 --   run.GAME.used_vouchers, ordered like the collection.
 --
@@ -109,7 +110,14 @@ local function make_card(saved, track)
     {bypass_discovery_center = true, bypass_discovery_ui = true, bypass_lock = true})
   track(card)
   if type(saved.ability) == 'table' then
+    local fresh = card.ability
     card.ability = deep_copy(saved.ability)
+    -- What the save lacks keeps the fresh card's value: Steamodded's set_edition does
+    -- arithmetic on ability.card_limit, which only its set_ability creates, so a save
+    -- made before Steamodded was installed has none.
+    for k, v in pairs(fresh) do
+      if card.ability[k] == nil then card.ability[k] = v end
+    end
     for _, flag in ipairs(REMOVAL_FLAGS) do card.ability[flag] = nil end
   end
   card.added_to_deck = nil

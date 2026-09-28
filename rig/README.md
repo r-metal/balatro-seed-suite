@@ -135,7 +135,8 @@ LÖVE 11.5. It runs headless, like `smoke.sh`, with a throwaway Mods folder in
 
 `make lovely-check` runs the compatibility matrix:
 - plain lovely;
-- Steamodded (Finder search, Oracle, Mods-menu listing);
+- Steamodded (Finder search, Oracle on every deck, Mods-menu listing, Save Slots preview of a
+  pre-Steamodded save, the paused-game RNG, the golden suites);
 - Steamodded with Pokermon.
 
 Most scenarios assume the unmodded game's profile and flow, so the Steamodded ones are written

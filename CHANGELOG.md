@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — 2026-09-28
+
+Two fixes for games with Steamodded.
+
+- **Fix: under Steamodded, the Oracle failed on the Zodiac, Painted, Anaglyph, Plasma and Erratic decks** with "attempt to concatenate local 'v' (a function value)". Steamodded adds a function to these five decks that the simulator could not copy. The Finder's check of a hit on these decks failed the same way.
+- **Fix: under Steamodded, Save Slots could not preview a save made before Steamodded was installed** if one of its cards had an edition ("attempt to perform arithmetic on field 'card_limit'").
+- Under the hood: `make lovely-check` plans every deck under Steamodded and previews a pre-Steamodded save (`lovely_preview_smods`).
+
 ## 0.3.2 — 2026-09-26
 
 The Seed Finder and Oracle do much more under Steamodded, now that their predictions were checked against the real Steamodded game.

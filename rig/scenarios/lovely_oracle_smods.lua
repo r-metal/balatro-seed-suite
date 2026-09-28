@@ -9,6 +9,23 @@ return {
     ctx.assert(#BHCore.env().content == 0, 'content mods detected')
     return true
   end},
+  -- Steamodded takes ownership of five vanilla decks and leaves an inject function
+  -- among their fields, which STR_PACK can't carry: the Oracle failed on Anaglyph Deck.
+  {name = 'every deck', run = function(ctx)
+    local state, predict = require('bhcore.sim.state'), require('bhcore.sim.predict')
+    local n, owned = 0, {}
+    for _, b in ipairs(G.P_CENTER_POOLS.Back) do
+      if b.taken_ownership then owned[#owned + 1] = b.key end
+      local ok, err = pcall(function()
+        predict.plan(state.fresh('ZJ9ZQJDL', {deck = b.key}), {antes = 1, shops_per_ante = 1, open_packs = false})
+      end)
+      ctx.assert(ok, b.key..': '..tostring(err))
+      n = n + 1
+    end
+    ctx.assert(#owned > 0, 'no deck taken over by Steamodded: the case is not exercised')
+    ctx.log(('%d decks planned; taken over: %s'):format(n, table.concat(owned, ' ')))
+    return true
+  end},
   {name = 'start run', run = function(ctx) ctx.start_run{}; return true end},
   {name = 'blind select', timeout = 30, run = function(ctx)
     return G.STAGE == G.STAGES.RUN and G.STATE == G.STATES.BLIND_SELECT and G.blind_select ~= nil

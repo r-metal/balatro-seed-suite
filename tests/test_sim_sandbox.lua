@@ -286,6 +286,25 @@ H.test('fresh applies stake rules and drops the deck\'s events', function()
   H.eq(g.tarot_rate, nil, 'the dropped event never ran')
 end)
 
+-- Steamodded's take_ownership (zodiac, painted, anaglyph, plasma, erratic) makes the
+-- center an object of its class and leaves functions such as inject among its own
+-- fields; STR_PACK errors on a function.
+H.test('fresh takes a Steamodded-owned deck: functions dropped, the data kept', function()
+  local state = world()
+  local SMODSBack = setmetatable({}, {__index = Object})
+  SMODSBack.__index = SMODSBack
+  setmetatable(SMODSBack, Object)
+  G.P_CENTERS.b_anaglyph = setmetatable({key = 'b_anaglyph', set = 'Back', name = 'Anaglyph Deck',
+    config = {}, unlock_condition = {stake = 5}, taken_ownership = true, generate_ui = 0,
+    inject = function() end, atlas_obj = setmetatable({}, Object)}, SMODSBack)
+  local S = state.fresh('ZJ9ZQJDL', {deck = 'b_anaglyph'})
+  local k = S.game.selected_back_key
+  H.eq(k.key, 'b_anaglyph'); H.eq(k.unlock_condition.stake, 5); H.eq(k.taken_ownership, true)
+  H.eq(k.inject, nil, 'function dropped'); H.eq(k.atlas_obj, 'MANUAL_REPLACE', 'nested Object as STR_PACK has it')
+  H.eq(getmetatable(k), nil)
+  H.ok(pcall(STR_PACK, S.game), 'the sim state still packs')
+end)
+
 H.test('fresh with an unknown deck errors and restores the live run', function()
   local state = world()
   local live, jokers = G.GAME, G.jokers

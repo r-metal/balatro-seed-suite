@@ -1,7 +1,7 @@
 -- bh-core is a folder of its own in Mods/. Without it, or with one from another
 -- release, SaveSlots stays off and the main menu says why, instead of the game failing
 -- to boot. NEEDS is this release's major.minor (scripts/release.py checks it).
-local NEEDS = '0.3'
+local NEEDS = '0.4'
 local core = package.preload['bhcore.init'] and require('bhcore.init')
 if type(core) == 'table' and core.compat and core.compat(NEEDS) then
   require('saveslots.init')

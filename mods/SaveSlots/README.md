@@ -27,6 +27,9 @@ consumables, vouchers).
   Auto-checkpoint pruning never deletes a checkpoint you filed.
 - **Search:** the box under the name matches a save's name, seed, deck, notes,
   target or folder as you type.
+- **Backups:** the Backups button lists your profile backups (progress, unlocks, stats; one is
+  taken automatically each day, the last 7 kept) with **Back up now**. **Restore** works from the
+  main menu, takes two presses, and first backs up what you have now.
 - Loading a save also makes it the main-menu **Continue** run.
 - Brainstorm's `z/x + 1-5` slots are imported once as "Brainstorm slot N".
   The originals are left in place.

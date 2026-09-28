@@ -44,9 +44,32 @@
 -- before its next one is taken by its open_pack step and used by the use_soul
 -- step that follows; only the use_soul step says so.
 --
--- What is routed: every clause in mode 'all', the clause that hit in mode
--- 'any'. tag / boss / voucher / legendary clauses add no step (the filter
+-- What is routed: every clause in mode 'all' but the excluded ones, the
+-- clause that hit in mode 'any'. For an any-of group that is the member that
+-- hit (its details' hit), routed like that clause on its own; the other
+-- members add nothing, though their needs still shape the walk the route
+-- replays (needs and chained antes come from every plain clause of f, group
+-- members included, as the filter's walk does). A chained ante's skips are
+-- read off the details' tag_packs (a from_tag member there may never have
+-- been evaluated).
+-- tag / boss / voucher / legendary clauses add no step (the filter
 -- assumes no action for them); their antes still count toward cost.ante.
+-- A tag or voucher clause with by ("by ante N", T-313a) adds no step either
+-- (no route step draws the per-ante 'Tag'/'Voucher' streams, so nothing is
+-- played for it; as for a plain tag clause, no step names the blind to skip
+-- for the tag), and it counts the ante its details found it in
+-- (details.ante), not N. So does a boss clause with by (T-375): the route
+-- never rerolls a boss, and the found ante counts, not N.
+-- An excluded clause (exclude = true, T-375, a must-not) adds no step and no
+-- cost: it is not routed, and its ante (or N) does not count toward
+-- cost.ante. Only its needs remain, as the filter's walk drew them (a
+-- non-final shop of a routed ante still makes the R rerolls and opens the
+-- packs an excluded shop_joker, joker, pack or soul_in_pack clause asked of
+-- that ante, and an excluded from_tag clause still chains its ante), so the
+-- shops the route plays are the filter's walk, the one the must-not was
+-- judged on. A filter of excluded clauses alone routes to no step, at ante 1.
+-- A sticker = 'none' clause is routed as without it: its details name the
+-- clean copy, and the route plays up to that copy.
 -- A joker clause ("by ante N") is routed at the ante its details name, not N:
 -- that ante is replayed like a shop_joker's (a row hit) or a shop Soul's (a
 -- Buffoon pack hit: all R rerolls, then the packs up to its slot, and the
@@ -99,7 +122,8 @@ end
 local BLIND = {Small = 'Small Blind', Big = 'Big Blind', Boss = 'Boss Blind'}
 
 ------------------------------------------------------------------------------
--- The filter's walk, from f (mirrors filter.lua's shop_needs / chained_antes)
+-- The filter's walk, from f (mirrors filter.lua's shop_needs / chained_antes,
+-- over filter.plain_clauses: group members count)
 
 local function needs_of(f)
   local needs = {}
@@ -108,7 +132,8 @@ local function needs_of(f)
     needs[a] = n
     return n
   end
-  for _, c in ipairs(f.clauses) do
+  local plain = filter.plain_clauses(f)
+  for _, c in ipairs(plain) do
     if c.kind == 'joker' then
       for a = 1, c.ante do
         local n = need(a)
@@ -126,45 +151,80 @@ local function needs_of(f)
       end
     end
   end
-  for _, c in ipairs(f.clauses) do
+  for _, c in ipairs(plain) do
     if c.kind == 'soul_in_pack' and c.from_tag and needs[c.ante] then needs[c.ante].chained = true end
   end
   return needs
 end
 
--- Whether details is a hit for f, and the clause indices to route.
+-- Every evaluated plain clause with its result, group members included:
+-- list of {c, r}. An excluded clause is left out: on a hit it holds because
+-- its positive form failed, so its result names no card, pack or shop.
+local function evaluated(f, details)
+  local out = {}
+  for i, c in ipairs(f.clauses) do
+    local r = details.results[i]
+    if c.kind == 'group' then
+      local rs = type(r) == 'table' and type(r.results) == 'table' and r.results or {}
+      for m, mc in ipairs(c.clauses) do
+        if type(rs[m]) == 'table' then out[#out + 1] = {c = mc, r = rs[m]} end
+      end
+    elseif type(r) == 'table' and not c.exclude then
+      out[#out + 1] = {c = c, r = r}
+    end
+  end
+  return out
+end
+
+-- The plain clause to route for top-level entry i, when its result holds:
+-- {c, r, name}; for a group, the member that hit.
+local function hit_of(f, details, i)
+  local c, r = f.clauses[i], details.results[i]
+  if not (type(r) == 'table' and r.ok) then return nil end
+  if c.kind ~= 'group' then return {c = c, r = r, name = 'clause '..i} end
+  local m = r.hit
+  local mr = type(r.results) == 'table' and r.results[m]
+  if not (c.clauses[m] and type(mr) == 'table' and mr.ok) then return nil end
+  return {c = c.clauses[m], r = mr, name = 'clause '..i..', member '..m}
+end
+
+-- Whether details is a hit for f, and the clauses to route ({c, r, name}).
+-- An excluded clause must hold for a hit but is not routed (mode 'all' only:
+-- validate refuses exclude in 'any').
 local function routed(f, details)
   if type(details) ~= 'table' or type(details.results) ~= 'table' then return nil end
   local out = {}
   if f.mode == 'any' then
     for i = 1, #f.clauses do
-      local r = details.results[i]
-      if r and r.ok then out[1] = i; return out end
+      local t = hit_of(f, details, i)
+      if t then out[1] = t; return out end
     end
     return nil
   end
   for i = 1, #f.clauses do
-    local r = details.results[i]
-    if not (r and r.ok) then return nil end
-    out[i] = i
+    local t = hit_of(f, details, i)
+    if not t then return nil end
+    if not f.clauses[i].exclude then out[#out + 1] = t end
   end
   return out
 end
 
--- The tag packs the details saw at ante a (every from_tag clause there shares
--- the same list).
+-- The tag packs the details saw at ante a: the eval's record of a chained
+-- ante, else any from_tag clause's there (they all share the same list).
 local function tag_packs(f, details, a)
-  for i, c in ipairs(f.clauses) do
-    local r = details.results[i]
-    if c.kind == 'soul_in_pack' and c.from_tag and c.ante == a and r and r.packs then return r.packs end
+  local walked = type(details.tag_packs) == 'table' and details.tag_packs[a]
+  if walked then return walked end
+  for _, t in ipairs(evaluated(f, details)) do
+    local c, r = t.c, t.r
+    if c.kind == 'soul_in_pack' and c.from_tag and c.ante == a and r.packs then return r.packs end
   end
 end
 
 -- Pack keys the details name at ante a: known[shop][slot].
 local function known_packs(f, details, a)
   local known = {}
-  for i, c in ipairs(f.clauses) do
-    local r = details.results[i]
+  for _, t in ipairs(evaluated(f, details)) do
+    local c, r = t.c, t.r
     if c.ante == a and r and r.shop and r.slot and r.pack then
       known[r.shop] = known[r.shop] or {}
       known[r.shop][r.slot] = r.pack
@@ -209,12 +269,15 @@ function M.build(f, details)
 
   -- Routed clauses by ante; the highest ante any of them names.
   local by_ante, last_ante = {}, 1
-  for _, i in pairs(idx) do
-    local c, r = f.clauses[i], details.results[i]
-    -- A joker clause ends where its details found it.
-    local a = c.kind == 'joker' and r.ante or c.ante
-    if c.kind == 'joker' and not (type(a) == 'number' and a >= 1 and a <= c.ante) then
-      return nil, 'details: joker clause '..i..' names no ante'
+  for _, t in ipairs(idx) do
+    local c, r = t.c, t.r
+    -- A joker clause, or a tag / voucher clause with by, ends where its
+    -- details found it (never N in their place when the details name none).
+    local found = c.kind == 'joker' or c.by
+    local a = c.ante
+    if found then a = r.ante end
+    if found and not (type(a) == 'number' and a >= 1 and a <= c.ante) then
+      return nil, 'details: '..c.kind..' '..t.name..' names no ante'
     end
     if a and a > last_ante then last_ante = a end
     local step_kind = c.kind == 'soul_in_pack' or c.kind == 'shop_joker' or c.kind == 'pack' or c.kind == 'joker'

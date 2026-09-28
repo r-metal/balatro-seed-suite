@@ -3,12 +3,14 @@ if RunJournal then return RunJournal end
 
 require('bhcore.init')
 
-RunJournal = {VERSION = '0.3.4'}
+RunJournal = {VERSION = '0.4.0'}
 RunJournal.recorder = require('runjournal.recorder')
 RunJournal.stats = require('runjournal.stats')
 RunJournal.ui = require('runjournal.ui')
+RunJournal.runinfo = require('runjournal.runinfo')
 
 RunJournal.recorder.install()
 RunJournal.ui.install()
+RunJournal.runinfo.install()
 
 return RunJournal

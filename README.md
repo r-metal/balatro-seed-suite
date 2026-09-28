@@ -81,8 +81,13 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 </p>
 
 - **Filters** combine clauses: skip tags, the boss, vouchers, the Soul's legendary, a Soul in a Charm or Ethereal pack,
-  shop jokers by ante N (with a reroll budget), packs, and editions. Name a filter yourself, and **Save as** keeps a
-  copy to tweak.
+  shop jokers, a joker **by ante N** (shops and Buffoon packs, with a reroll budget), packs, and editions. Vouchers,
+  tags and bosses can be "by ante N" too.
+- **and / or / not:** join clause rows with **or** for alternatives ("Telescope *or* Blueprint by ante 3"), and mark a
+  row **not** for something that must not happen ("no The Hook by ante 2"). From Black Stake, ask for a **clean** joker
+  (no sticker).
+- **Today:** one daily seed and deck for everyone, at White Stake. Play it blind (the Oracle stays locked) or routed.
+- Name a filter yourself, and **Save as** keeps a copy to tweak.
 - **Odds** before you search: how rare a hit is, how long the search should take, and which clause is the bottleneck.
 - **Hits are ranked by what they cost to deliver.** **Route** lists the exact plays: which blind to skip, which pack
   to open, which card is the Soul, and when to use it.
@@ -108,6 +113,8 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 - Named slots with a card-level preview of the jokers, consumables and vouchers each one holds. Favorites stay on top.
 - **Folders** and a **search** box (name, seed, deck, notes).
 - An **auto-checkpoint** every ante, so you can rewind, and practice scenarios you compose yourself.
+- **Profile backups:** your progress, unlocks and stats are backed up once a day (the last 7 kept) and on demand.
+  Restore one from the main menu.
 - **Share codes:** copy a slot's seed, deck, stake, notes and filter as one string. Import one to play it.
 - Details: [mods/SaveSlots/README.md](mods/SaveSlots/README.md).
 
@@ -118,7 +125,12 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 </p>
 
 - Records every run on its own: antes, blinds, hands and scores, jokers, and the outcome.
-- Stats by deck, stake and joker. CSV and JSON export.
+- Stats by deck, stake and joker, counting normal runs by default (seeded, Finder, challenge and daily runs are a
+  toggle away). CSV and JSON export.
+- **Jokers:** every joker you ended runs with: win rate, how many shops it lasted, and how often you took it when a
+  shop offered it.
+- **Daily:** your daily-seed runs and how they went.
+- **Run Info → History:** in a run, the blinds you played or skipped, the tags you took and the bosses you beat.
 - **Same seed:** runs of one seed side by side, ante by ante, and where they diverged.
 - **Hunts:** how each Finder filter's runs actually went (runs, wins, best ante).
 

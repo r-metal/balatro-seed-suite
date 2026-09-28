@@ -9,10 +9,71 @@
 --     `runjournal.stats(filter?)`. Only finished runs (the index entry has ended_at)
 --     count in runs/wins; `unfinished` counts the rest (in progress or abandoned) that
 --     pass the filter. win_rate is wins / runs, 0 with no runs.
+--     An endless reload is unfinished too, never a loss: reloading a won endless run
+--     starts a new record whose `won` is nil (T-370's known gap), so an entry with
+--     endless = true and won not true is counted in `unfinished` even once it ended.
 --     by_joker is the "build archetype" of 0.2.0: each key in the run's joker set at
 --     its end (jokers_final, else the last shop's jokers) counts that run once.
 --     filter: a function(entry) -> bool over index entries, or a table whose fields
---     must all match: {deck, stake, seed, won = bool, joker = key (in the end set)}.
+--     must all match: {deck, stake, seed, won = bool, joker = key (in the end set),
+--     include = {seeded, finder, challenge, daily}}.
+--     include (T-371): which kinds of run count besides normal ones (see kind_of).
+--     A kind whose field is missing or false is left out. No `include` at all leaves
+--     nothing out, so a bare stats() and the 0.3 table filters count every run as
+--     before; the Journal's screen starts from DEFAULT_FILTER instead.
+--   stats.DEFAULT_FILTER = {include = {seeded = false, finder = false, challenge =
+--     false, daily = false}}: normal runs only (the locked research answer). Shared:
+--     copy it before changing it.
+--   stats.KINDS = {'seeded', 'finder', 'challenge', 'daily'}, the include fields.
+--   stats.kind_of(run) -> 'daily' | 'finder' | 'challenge' | 'seeded' | nil (normal).
+--     run: an index entry (T-370's flags) or a record (flags derived from its seeded,
+--     challenge and origin as the recorder derives an entry's). The first that
+--     applies wins, in that order: a daily run is seeded too, a Finder run may be.
+--     An entry without flags (recorded before 0.4.0) is normal; so is an endless run.
+--   stats.jokers(filter?, runs?, read?) -> {row, ...}: one row per joker key seen in
+--     a counted run (finished and passing `filter`, as compute counts runs), at its
+--     end, at any shop, or (T-378b) offered in any shop. row = {key, runs, wins,
+--     win_rate, held, lifespan, offered, picked, pick_rate}:
+--       runs/wins/win_rate  as by_joker: runs whose end set held it, and their wins;
+--       held      runs where it was held at a shop (a jokers_seen snapshot has it);
+--       lifespan  the mean number of shops it was held, over those `held` runs (nil
+--                 when held is 0: bought in the last shop, say).
+--       offered   (T-378b) runs whose record's `offered` (T-372a) has it: a shop's
+--                 card row showed it at least once, rerolls included;
+--       picked    of those runs, the ones where it was also held at some shop (as
+--                 `held` counts: a jokers_seen snapshot has it);
+--       pick_rate picked / offered, nil when offered is 0.
+--     offered/picked/pick_rate count only runs whose record has an `offered` table,
+--     i.e. recorded by 0.4.0 or later: an older run still counts in runs/wins/held
+--     but never in the pick rate, and a joker with no offered data has pick_rate nil.
+--     A joker bought in the run's last shop is in no later jokers_seen snapshot, so
+--     it is offered but not picked there (the `held` rule, kept on purpose).
+--     Every key, not a top N. Rows come sorted by runs, then key (sort_jokers).
+--     runs: index entries or records, default recorder.list(). An entry's jokers_seen
+--     and offered come from its record, through read(run_id) (default recorder.read;
+--     the UI passes a per-open cache, as the Hunts tab does). An unreadable record
+--     still counts in runs/wins from the entry, and adds nothing to held/lifespan or
+--     the pick rate. Reads only.
+--   stats.sort_jokers(rows, by, name_of?) -> rows, sorted in place, highest first by
+--     `by` ('runs' | 'win_rate' | 'lifespan' | 'pick_rate'; a nil lifespan or
+--     pick_rate sorts last), ties by name ascending: row.name, else name_of(row.key),
+--     else the key.
+--   stats.dailies(runs?, read?) -> {row, ...}: (T-378b) the daily seed's runs, newest
+--     first (started_at, then run_id), every run of a date listed on its own: nothing
+--     is collapsed. A run is daily when it is a record whose origin.kind is 'daily'
+--     (recorder.set_origin, which seedfinder.daily's play calls) or an index entry
+--     with daily = true (T-370's flag). row = {run_id, date, mode, seed, deck, stake,
+--     won, final_ante, started_at, ended_at}:
+--       date   origin.date ('YYYY-MM-DD', the UTC day the seed was picked for), else
+--              the UTC date of started_at;
+--       mode   origin.mode, 'blind' | 'routed', or nil when unknown;
+--       won    true (won), false (finished without a win), nil (unfinished, the
+--              endless reload included: `finished` below, as compute counts it).
+--     An entry carries no origin, so a daily entry's record is read through
+--     read(run_id) (default recorder.read; the UI passes its per-open cache); only
+--     daily entries are read, and an unreadable one keeps its row with the date from
+--     started_at and no mode. It takes no filter: the Daily tab lists every daily run
+--     (the include toggles hide them from the other numbers only). Reads only.
 --   stats.export(fmt) -> path | nil, err. fmt = 'csv' | 'json'. Writes every recorded
 --     run (finished or not) to '<profile>/runjournal/export-<os.time>.<fmt>', plain text
 --     through love.filesystem, and verifies it by reading it back.
@@ -42,6 +103,8 @@
 --     the mean final_ante of the finished runs (nil with none); best_ante is the
 --     highest final_ante of any run and newest the latest started_at, both over every
 --     run. Groups: best win rate first, then more runs, newest, name. Reads only.
+--     It takes no filter: hunts are Finder runs by definition, so the include toggles
+--     (and deck/stake) never apply to it.
 local recorder = require('runjournal.recorder')
 
 local stats = {}
@@ -49,6 +112,44 @@ local stats = {}
 stats.CSV_COLUMNS = {'run_id', 'seed', 'deck', 'stake', 'started_at', 'ended_at', 'won',
   'final_ante', 'final_round', 'blinds_played', 'blinds_skipped', 'hands_played',
   'best_hand', 'best_score', 'jokers'}
+
+stats.KINDS = {'seeded', 'finder', 'challenge', 'daily'}
+stats.DEFAULT_FILTER = {include = {seeded = false, finder = false, challenge = false, daily = false}}
+
+-- A record (it has antes or jokers_seen), not an index entry.
+local function is_record(x)
+  return x.antes ~= nil or x.jokers_seen ~= nil
+end
+
+-- The run's joker set at its end: an entry's `jokers`, a record's jokers_final or its
+-- last shop's jokers.
+local function end_set(x)
+  if x.jokers ~= nil then return x.jokers end
+  if x.jokers_final ~= nil then return x.jokers_final end
+  local seen = x.jokers_seen
+  return type(seen) == 'table' and seen[#seen] or {}
+end
+
+function stats.kind_of(e)
+  if type(e) ~= 'table' then return nil end
+  local finder, daily = e.finder == true, e.daily == true
+  if is_record(e) and type(e.origin) == 'table' then
+    local o = e.origin
+    finder = (o.filter_name ~= nil and o.filter_name ~= false) or o.kind == 'finder'
+    daily = o.kind == 'daily'
+  end
+  if daily then return 'daily' end
+  if finder then return 'finder' end
+  if type(e.challenge) == 'string' then return 'challenge' end
+  if e.seeded == true then return 'seeded' end
+  return nil
+end
+
+-- Finished for the stats: it ended, and is not an endless reload (see the header).
+local function finished(e)
+  if not e.ended_at then return false end
+  return not (e.endless == true and e.won ~= true)
+end
 
 local function matches(e, f)
   if f == nil then return true end
@@ -60,8 +161,12 @@ local function matches(e, f)
   if f.won ~= nil and (e.won == true) ~= f.won then return false end
   if f.joker ~= nil then
     local found = false
-    for _, k in ipairs(e.jokers or {}) do if k == f.joker then found = true end end
+    for _, k in ipairs(end_set(e) or {}) do if k == f.joker then found = true end end
     if not found then return false end
+  end
+  if type(f.include) == 'table' then
+    local kind = stats.kind_of(e)
+    if kind ~= nil and f.include[kind] ~= true then return false end
   end
   return true
 end
@@ -80,7 +185,7 @@ function stats.compute(filter)
     by_deck = {}, by_stake = {}, by_joker = {}}
   for _, e in ipairs(recorder.list()) do
     if matches(e, filter) then
-      if e.ended_at then
+      if finished(e) then
         local won = e.won == true
         out.runs = out.runs + 1
         if won then out.wins = out.wins + 1 end
@@ -97,6 +202,91 @@ function stats.compute(filter)
   end
   out.win_rate = out.runs > 0 and out.wins / out.runs or 0
   return out
+end
+
+-- Jokers -----------------------------------------------------------------------------
+
+function stats.jokers(filter, runs, read)
+  if runs == nil then runs = recorder.list() end
+  read = read or recorder.read
+  local rows, out = {}, {}
+  local function row(key)
+    local r = rows[key]
+    if not r then
+      r = {key = key, runs = 0, wins = 0, win_rate = 0, held = 0, shops = 0, offered = 0, picked = 0}
+      rows[key] = r
+      out[#out + 1] = r
+    end
+    return r
+  end
+  for _, e in ipairs(runs or {}) do
+    if type(e) == 'table' and finished(e) and matches(e, filter) then
+      local won = e.won == true
+      local once = {}
+      for _, k in ipairs(end_set(e) or {}) do
+        if not once[k] then
+          once[k] = true
+          local r = row(k)
+          r.runs = r.runs + 1
+          if won then r.wins = r.wins + 1 end
+        end
+      end
+      local rec = e
+      if not is_record(e) then
+        local ok, got = pcall(read, e.run_id)
+        rec = ok and type(got) == 'table' and got or nil
+      end
+      local shops = {}   -- key -> the shops of this run that held it
+      for _, snap in ipairs(rec and type(rec.jokers_seen) == 'table' and rec.jokers_seen or {}) do
+        local here = {}
+        for _, k in ipairs(type(snap) == 'table' and snap or {}) do
+          if not here[k] then here[k] = true; shops[k] = (shops[k] or 0) + 1 end
+        end
+      end
+      for k, n in pairs(shops) do
+        local r = row(k)
+        r.held = r.held + 1
+        r.shops = r.shops + n
+      end
+      -- The pick rate: only a record that has `offered` (0.4.0 on) says what its
+      -- shops showed; a run without it adds nothing here.
+      local offered = rec and type(rec.offered) == 'table' and rec.offered or nil
+      for k, n in pairs(offered or {}) do
+        if type(k) == 'string' and type(n) == 'number' and n > 0 then
+          local r = row(k)
+          r.offered = r.offered + 1
+          if shops[k] then r.picked = r.picked + 1 end
+        end
+      end
+    end
+  end
+  for _, r in ipairs(out) do
+    r.win_rate = r.runs > 0 and r.wins / r.runs or 0
+    r.lifespan = r.held > 0 and r.shops / r.held or nil
+    r.pick_rate = r.offered > 0 and r.picked / r.offered or nil
+    r.shops = nil
+  end
+  return stats.sort_jokers(out, 'runs')
+end
+
+function stats.sort_jokers(rows, by, name_of)
+  local function name(r)
+    if r.name ~= nil then return tostring(r.name) end
+    if name_of then return tostring(name_of(r.key)) end
+    return tostring(r.key)
+  end
+  local function value(r)
+    local v = r[by or 'runs']
+    return type(v) == 'number' and v or -1
+  end
+  table.sort(rows, function(a, b)
+    local x, y = value(a), value(b)
+    if x ~= y then return x > y end
+    local na, nb = name(a), name(b)
+    if na ~= nb then return na < nb end
+    return tostring(a.key) < tostring(b.key)
+  end)
+  return rows
 end
 
 -- JSON ---------------------------------------------------------------------------
@@ -320,6 +510,43 @@ function stats.by_filter(runs)
     if x.runs ~= y.runs then return x.runs > y.runs end
     if (x.newest or 0) ~= (y.newest or 0) then return (x.newest or 0) > (y.newest or 0) end
     return x.filter_name < y.filter_name
+  end)
+  return out
+end
+
+-- Daily seeds ------------------------------------------------------------------------
+
+local function is_daily(e)
+  if is_record(e) then return type(e.origin) == 'table' and e.origin.kind == 'daily' end
+  return e.daily == true
+end
+
+function stats.dailies(runs, read)
+  if runs == nil then runs = recorder.list() end
+  read = read or recorder.read
+  local out = {}
+  for _, e in ipairs(runs or {}) do
+    if type(e) == 'table' and is_daily(e) then
+      local origin = e.origin
+      if not is_record(e) then
+        local ok, r = pcall(read, e.run_id)
+        origin = ok and type(r) == 'table' and r.origin or nil
+      end
+      if type(origin) ~= 'table' then origin = {} end
+      local date = type(origin.date) == 'string' and origin.date or nil
+      if not date and type(e.started_at) == 'number' then date = os.date('!%Y-%m-%d', e.started_at) end
+      local mode = (origin.mode == 'blind' or origin.mode == 'routed') and origin.mode or nil
+      local won = nil
+      if e.won == true then won = true elseif finished(e) then won = false end
+      out[#out + 1] = {run_id = e.run_id, date = date, mode = mode, seed = e.seed, deck = e.deck,
+        stake = e.stake, won = won, final_ante = e.final_ante, started_at = e.started_at,
+        ended_at = e.ended_at}
+    end
+  end
+  table.sort(out, function(x, y)
+    local tx, ty = tonumber(x.started_at) or 0, tonumber(y.started_at) or 0
+    if tx ~= ty then return tx > ty end
+    return tostring(x.run_id) > tostring(y.run_id)
   end)
   return out
 end

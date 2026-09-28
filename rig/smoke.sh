@@ -63,10 +63,12 @@ run_locked() {
   fi
 
   # XDG_DATA_HOME isolates the save dir (love/<identity> under it); ALSOFT_DRIVERS
-  # keeps audio off the real sound server. The game's own stdout/stderr go to log.txt.
+  # keeps audio off the real sound server; the SDL hint hides every game controller
+  # (SDL reads /dev/input itself, so a pad in use on this machine drove rig games:
+  # journal/2026-09-28-rig-host-gamepad.md). The game's own stdout/stderr go to log.txt.
   local status=0
   nice -n "${SMOKE_NICE:-15}" timeout -k 5 "$WALL_TIMEOUT" headless-run --res 1280x720 -- \
-    env XDG_DATA_HOME="$out/home" ALSOFT_DRIVERS=null \
+    env XDG_DATA_HOME="$out/home" ALSOFT_DRIVERS=null SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT=0x0000/0x0000 \
     bash -c 'exec "$0" "$1" >>"$2" 2>&1' "$LOVE_DIR/AppRun" "$out/game" "$out/log.txt" \
     >"$out/headless.txt" 2>&1 || status=$?
 

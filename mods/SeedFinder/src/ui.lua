@@ -15,7 +15,7 @@
 --                          saveslots.entry: create_tabs is wrapped for the duration of
 --                          run_setup and the tab goes into its args before the original
 --                          runs. Either wrap order ends New Run, Continue, Saves, Find,
---                          Challenges.
+--                          Challenges. What it holds: Find tab, below.
 --
 -- Overlay (create_UIBox_generic_options; Back returns to where it was opened from:
 -- Options, the pause menu or the Play screen)
@@ -23,14 +23,78 @@
 --                  stake, match (all/any clauses) and "All unlocked". Deck and stake follow
 --                  vanilla's run-setup rule: only unlocked decks, stakes up to one
 --                  above the deck's best win (all of them on an all-unlocked
---                  profile). Then the clause list (at most MAX_CLAUSES rows: kind,
---                  ante, an extra field, key, remove) and "Add clause". Keys come
+--                  profile). Then the clause list (at most MAX_CLAUSES rows: connector,
+--                  kind, ante, an extra field, key, remove) and "Add clause". Keys come
 --                  from the G.P_* pools with localized names (jokers sorted by name). The extra field is
---                  the blind for a tag (Any/Small/Big),
---                  the rerolls for a shop joker, the Soul's index for a legendary;
---                  soul_in_pack's key cycle picks the pack and the source. A
---                  filter's name is generated from its clauses ("Charm Tag + Soul
---                  in Arcana", cut at NAME_MAX) until the player types one: then
+--                  the blind for a tag (Any blind / Small / Big, each also "by ante":
+--                  "Small, by ante" sets by = true, T-313a), At ante / By ante (by)
+--                  for a Voucher and a Boss (T-375: the Boss of some ante 1..N), the
+--                  rerolls for a shop joker and for "Joker by ante" (the joker kind:
+--                  its ante cycle reads "By ante N", its keys are the non-legendary
+--                  jokers, from = 'both'), the Soul's index for a legendary;
+--                  soul_in_pack's key cycle picks the pack and the source. by is
+--                  true or absent, never false, so an "at ante" clause is the data
+--                  it was before T-313a. The reroll cycle reads "No rerolls", "1
+--                  reroll" .. "5 rerolls"; on a filter at Black Stake (4) or higher
+--                  it offers each count twice, short: "R0" and "R0 clean" .. "R5
+--                  clean" (T-378a: "No rerolls, clean" was drawn at half the cycle's
+--                  text scale; every label now reads at 0.8 or more of it, measured
+--                  by finder_today), clean being sticker = 'none' (no eternal,
+--                  perishable or rental sticker on the card that counts; T-375).
+--                  Stickers start at Black Stake, so below it only the plain counts
+--                  show, and lowering the stake (the stake cycle, or a deck change
+--                  that caps it) drops sticker from every clause; so does loading
+--                  a filter below it (sane: the same seeds hold). sticker is 'none'
+--                  or absent. Every edit rebuilds the panel, since a label (the
+--                  name, a "by A3") can change with any cycle; a stake change only
+--                  when it crosses Black Stake.
+--   Groups         the any-of groups of filter.lua (T-312, one level) are made
+--                  with connectors only; there is no group kind. The list stays
+--                  flat, one row per plain clause, and every row after the first
+--                  starts with a connector, a button "and" / "or" (/ "not", see
+--                  Must-not) joining it
+--                  to the row above. "or" binds tighter than "and": A and B or C
+--                  is A and (B or C). The rows are a view of f.clauses, derived
+--                  from it on each build and never stored (rows_of): a run of rows
+--                  joined by "or" is one {kind = 'group', clauses} entry, a single
+--                  row a plain clause, so a filter with groups loads as its groups'
+--                  members joined by "or". Every edit (connector, remove, add, any
+--                  cycle) rebuilds f.clauses from the rows (clauses_of) in
+--                  changed(). Removing the first row of a run hands its connector
+--                  to the next row, so the rest of that run stays a group and a
+--                  2-member group leaves a plain clause. With match "Any clause"
+--                  every row is already "or": the connectors are hidden and
+--                  switching to it flattens the groups (a filter loaded with mode
+--                  any and groups is flattened too: the same seeds hold). The
+--                  generated name shows a group as "(A or B)".
+--                  MAX_CLAUSES caps the rows (plain clauses and group members), so
+--                  the list's height rules don't change.
+--   Must-not       (T-376) filter.lua's exclude (T-375: a top-level plain clause of
+--                  a mode-'all' filter that holds when its positive form fails) is
+--                  the connector's third state. Rows 2.. cycle "and" -> "or" ->
+--                  "not" -> "and" (seedfinder_c<i>_join); row 1, which had no
+--                  connector, gets a button of the same size cycling blank <->
+--                  "not" (its own id, seedfinder_c1_not). "not" means "and not":
+--                  the row is an excluded top-level clause (exclude = true, never
+--                  false; any other row's exclude is cleared). There is no "not"
+--                  kind. A "not" row is never a group member: entries_of reads an
+--                  "or" under a "not" row as starting a run that the rows below it
+--                  join, and rows_of shows a group after a "not" row starting with
+--                  "and", so "not A / and B / or C" reads not A, and (B or C). A
+--                  click moves to the next state that changes the filter: "or"
+--                  straight under a "not" row pulls the row below into a group with
+--                  it (it can't join upward), and is passed over when there is no
+--                  row below to pull (none, a "not" one, or already joined). A
+--                  kind change keeps the row's "not"; removing a row hands on only
+--                  an "or" (the next row's own "not" stays). Switching the match to
+--                  "Any clause" drops exclude from every clause (validate refuses
+--                  it there) and, when there was one, the status line says "must-not
+--                  clauses dropped in Any mode"; the connectors hide. The generated
+--                  name reads "no The Plant by A3", and a clean clause
+--                  "Blueprint by A3 (clean)".
+--                  A filter's name is generated from its clauses ("Charm Tag + Soul
+--                  in Arcana", "(Telescope by A3 or Blueprint by A3)", cut at
+--                  NAME_MAX) until the player types one: then
 --                  `named` is true (an additive field, kept in filters.jkr; sane()
 --                  keeps it only as a boolean) and clause edits leave the name
 --                  alone. A typed name is trimmed and capped at NAME_MAX (30); an
@@ -79,7 +143,11 @@
 --                  soon as the filter differs from the one sampled, its name aside
 --                  (a rename keeps them).
 --   Width          the overlay keeps one width whatever it shows (T-316): the clause
---                  rows and hit rows fit inside their panels' minw, and the status and
+--                  rows (connector included: every row under "Any clause" holds an
+--                  empty cell of its width; the clause
+--                  cycles' padding is ROW_PAD, not vanilla's 0.1, so the connector's
+--                  room comes out of the gaps and a row is 0.66 tall) and hit rows fit
+--                  inside their panels' minw, and the status and
 --                  odds lines are held by maxw. A row wider than its panel's minw
 --                  would widen the whole overlay the moment it appeared. The filter
 --                  row (cycle + four buttons) and the name editor's row fit FILTER_W
@@ -110,6 +178,23 @@
 --                    {kind = 'finder', filter_name, filter}}). It waits for bh-core's
 --                    run_start of that seed first, because until then checkpoint.get()
 --                    still returns the previous run's snapshot.
+-- Find tab           TAB_W x TAB_H in every state, so the Play screen keeps the size
+--                    it had with no hits (T-378a; before it, three hits grew the tab
+--                    to 5.71 tall): "Seed Finder", the current filter's box beside Open
+--                    Seed Finder, the hits area (HITS_H, whatever it shows: the three
+--                    cheapest hits with Play and Route, as in the overlay, the running
+--                    search's status, or a hint), then the Today box.
+-- Today (T-378a)     the day's daily seed (seedfinder.daily): today()'s UTC date and
+--                    seed, the deck deck_for says will be played (Red Deck when the
+--                    day's deck is locked on this profile, plus the reason: deck_for's,
+--                    cut before ": playing Red Deck"), White Stake, Play blind
+--                    (daily.play('blind'): the Oracle stays locked for that run) and
+--                    Play routed (daily.play('routed')), and the line "Blind: the
+--                    Oracle stays locked. Routed: use it.". A Play cancels a running
+--                    search, as a hit's Play does, and the run stays seeded (the
+--                    Game:start_run wrap unseeds a hit's seed only). The ticker redraws
+--                    the tab when the UTC day turns while it is open, so the row
+--                    always shows the day the buttons start.
 --
 -- Driving: one ticker event (no_delete, non-blocking, pause_force, 'other' queue)
 -- runs while the overlay is up, a search runs or a hunt waits. It polls the engine
@@ -153,7 +238,9 @@
 --   seedfinder_open (Options/pause/Find tab), seedfinder_cycle (every cycle arrow:
 --   [seedfinder_<cycle>_l|_r], cycles: filter, deck, stake, mode, workers, c<i>_kind,
 --   c<i>_ante, c<i>_extra, c<i>_key, hits_page), seedfinder_add, seedfinder_remove
---   [seedfinder_remove_<i>], seedfinder_new, seedfinder_delete, seedfinder_rename
+--   [seedfinder_remove_<i>], seedfinder_join [seedfinder_c<i>_join on rows 2.. and
+--   seedfinder_c1_not on row 1, under "All clauses" only; its label is the connector:
+--   and / or / not, row 1 blank / not], seedfinder_new, seedfinder_delete, seedfinder_rename
 --   [seedfinder_rename], seedfinder_save_as [seedfinder_save_as], in the name editor
 --   seedfinder_name_save [seedfinder_name_save] and seedfinder_name_cancel
 --   [seedfinder_name_cancel] (its input: the only 'text_input' in the Filter panel;
@@ -161,15 +248,22 @@
 --   seedfinder_cancel, seedfinder_odds, seedfinder_play [seedfinder_play_<i>, seedfinder_tabplay_<i>],
 --   seedfinder_hunt [seedfinder_hunt_<i>], seedfinder_route [seedfinder_route_<i>,
 --   seedfinder_tabroute_<i>]; in the Route panel seedfinder_play
---   [seedfinder_route_play] and the generic Back (seedfinder_route_back). Live
+--   [seedfinder_route_play] and the generic Back (seedfinder_route_back); in the
+--   Find tab's Today box seedfinder_daily_blind [seedfinder_daily_blind] and
+--   seedfinder_daily_routed [seedfinder_daily_routed]. Live
 --   text ids: seedfinder_scanned, seedfinder_rate, seedfinder_hits, seedfinder_hpm,
---   seedfinder_status; the Odds lines: seedfinder_odds_<k> (k = 1, 2). Route panel text ids: seedfinder_route_title, one per
---   wrapped line of step k: seedfinder_step_<k>_<line>, seedfinder_route_cost.
+--   seedfinder_status; the Odds lines: seedfinder_odds_<k> (k = 1, 2). The clause
+--   list's box: seedfinder_clauses. Route panel text ids: seedfinder_route_title, one per
+--   wrapped line of step k: seedfinder_step_<k>_<line>, seedfinder_route_cost. The
+--   Find tab: seedfinder_tab (its title), the Today box seedfinder_today and its
+--   texts seedfinder_today_date ('YYYY-MM-DD'), _seed, _deck (the deck's name),
+--   _stake (", White Stake"), _reason (only with the Red fallback) and _note.
 --
 -- The game font (m6x11plus) has no '·' or '—' glyphs: plain ASCII only.
 local filter = require('seedfinder.filter')
 local engine = require('seedfinder.engine')
 local route = require('seedfinder.route')
+local daily = require('seedfinder.daily')
 local fs = require('bhcore.fs')
 
 local M = {}
@@ -187,6 +281,9 @@ local HALF_W = 2.45       -- the Customize Deck / Seed Finder pair: 2 x 2.45 + 0
 local TAB_W, TAB_H = 6.4, 5.2
 local ROW2_H = 0.82       -- the deck/stake/mode row, and the name editor in its place
 local ROUTE_W = 11        -- the Route panel; its step lines wrap at ROUTE_W - 1
+-- Stickers start at Black Stake (its enable_eternals_in_shop; perishable and rental
+-- come later). Below it a sticker = 'none' clause reads as without it (filter.lua).
+local STICKER_STAKE = 4
 
 local installed = false
 local from = 'options'
@@ -202,6 +299,7 @@ local page = 1            -- the results list's page
 local shown = nil         -- see ui.route()
 local odds_job = nil      -- see ui.odds(); plus handle, the engine handle while it runs
 local editor = nil        -- the name editor while open: {filter, text}; text is its input's ref_value
+local today_shown = nil   -- the UTC date the Find tab's Today row was built for
 -- Live text (UIT.T ref_table/ref_value).
 local live = {scanned = '0', rate = '-', hits = '0', hpm = '-', status = ''}
 
@@ -272,6 +370,14 @@ local KINDS = {
   {kind = 'legendary', label = 'Soul joker'},
   {kind = 'shop_joker', label = 'Shop joker'},
   {kind = 'pack', label = 'Shop pack'},
+  {kind = 'joker', label = 'Joker by ante'},
+}
+
+-- The tag's blind cycle: the blind, and whether the tag may be in any ante 1..N (by).
+local TAG_BLINDS = {
+  {blind = 'any', label = 'Any blind'}, {blind = 'Small', label = 'Small'}, {blind = 'Big', label = 'Big'},
+  {blind = 'any', by = true, label = 'Any, by ante'}, {blind = 'Small', by = true, label = 'Small, by ante'},
+  {blind = 'Big', by = true, label = 'Big, by ante'},
 }
 
 local SOUL_PACKS = {
@@ -323,6 +429,13 @@ local function key_pool(kind)
     local list = {}
     for _, j in ipairs(G.P_CENTER_POOLS.Joker) do list[#list + 1] = {key = j.key} end
     for _, j in ipairs(by_name('Joker', list)) do add(j.key, j.name) end
+  elseif kind == 'joker' then
+    -- No shop or Buffoon pack makes a legendary (filter.lua: the Soul does).
+    local list = {}
+    for _, j in ipairs(G.P_CENTER_POOLS.Joker) do
+      if j.rarity ~= 4 then list[#list + 1] = {key = j.key} end
+    end
+    for _, j in ipairs(by_name('Joker', list)) do add(j.key, j.name) end
   elseif kind == 'soul_in_pack' then
     for i, p in ipairs(SOUL_PACKS) do add(i, p.label) end
   elseif kind == 'pack' then
@@ -334,19 +447,73 @@ local function key_pool(kind)
   return pools[kind]
 end
 
--- The extra field of a clause kind: {field, labels, values}, or nil.
-local function extra_of(kind)
+-- One clause field as a cycle's values: get reads it off a clause, set writes it.
+local function field(name, labels, values)
+  return {labels = labels, values = values,
+    get = function(c) return c[name] end, set = function(c, v) c[name] = v end}
+end
+
+-- The reroll counts of a shop joker or Joker by ante clause, as labels: in words
+-- below Black Stake ("No rerolls", "1 reroll"), and short from it up, where each
+-- count comes twice ("R0", "R0 clean": the hit rows' "A1 R0" notation). The words
+-- with ", clean" were shrunk to half the cycle's text scale; every short label
+-- reads at 0.8 or more of it inside the cycle's width (T-378a, finder_today).
+local function reroll_label(r)
+  return r == 0 and 'No rerolls' or (r..(r == 1 and ' reroll' or ' rerolls'))
+end
+local function short_reroll_label(r, clean)
+  return 'R'..r..(clean and ' clean' or '')
+end
+
+-- The extra field of a clause kind on a filter of `stake` (nil: below Black Stake):
+-- {labels, values, get(c), set(c, v)}, or nil. by (tag, Voucher, Boss) is written as
+-- true or left out, never false, and so is sticker ('none').
+local function extra_of(kind, stake)
   if kind == 'tag' then
-    return {field = 'blind', labels = {'Any blind', 'Small', 'Big'}, values = {'any', 'Small', 'Big'}}
-  elseif kind == 'shop_joker' then
     local labels, values = {}, {}
-    for r = 0, MAX_REROLLS do
-      values[#values + 1] = r
-      labels[#labels + 1] = r == 0 and 'No rerolls' or (r..(r == 1 and ' reroll' or ' rerolls'))
+    for i, b in ipairs(TAG_BLINDS) do labels[i], values[i] = b.label, i end
+    return {labels = labels, values = values,
+      get = function(c)
+        for i, b in ipairs(TAG_BLINDS) do
+          if b.blind == (c.blind or 'any') and (b.by or false) == (c.by == true) then return i end
+        end
+        return 1
+      end,
+      set = function(c, v)
+        local b = TAG_BLINDS[v] or TAG_BLINDS[1]
+        c.blind, c.by = b.blind, b.by
+      end}
+  elseif kind == 'voucher' or kind == 'boss' then
+    return {labels = {'At ante', 'By ante'}, values = {false, true},
+      get = function(c) return c.by == true end, set = function(c, v) c.by = v or nil end}
+  elseif kind == 'shop_joker' or kind == 'joker' then
+    if (stake or 1) < STICKER_STAKE then
+      local labels, values = {}, {}
+      for r = 0, MAX_REROLLS do values[r + 1], labels[r + 1] = r, reroll_label(r) end
+      return field('rerolls', labels, values)
     end
-    return {field = 'rerolls', labels = labels, values = values}
+    -- From Black Stake up each count comes twice, the second clean (sticker = 'none':
+    -- the card that counts has no eternal, perishable or rental sticker).
+    local opts, labels, values = {}, {}, {}
+    for r = 0, MAX_REROLLS do
+      for _, clean in ipairs{false, true} do
+        opts[#opts + 1] = {rerolls = r, clean = clean}
+        labels[#opts], values[#opts] = short_reroll_label(r, clean), #opts
+      end
+    end
+    return {labels = labels, values = values,
+      get = function(c)
+        for i, o in ipairs(opts) do
+          if o.rerolls == (c.rerolls or 0) and o.clean == (c.sticker == 'none') then return i end
+        end
+        return 1
+      end,
+      set = function(c, v)
+        local o = opts[v] or opts[1]
+        c.rerolls, c.sticker = o.rerolls, o.clean and 'none' or nil
+      end}
   elseif kind == 'legendary' then
-    return {field = 'index', labels = {'1st Soul', '2nd Soul'}, values = {1, 2}}
+    return field('index', {'1st Soul', '2nd Soul'}, {1, 2})
   end
 end
 
@@ -355,7 +522,7 @@ local function default_clause(kind, ante)
   local c = {kind = kind}
   if kind ~= 'legendary' then c.ante = ante or 1 end
   local ex = extra_of(kind)
-  if ex then c[ex.field] = ex.values[1] end
+  if ex then ex.set(c, ex.values[1]) end
   local pool = key_pool(kind)
   if kind == 'soul_in_pack' then
     c.pack, c.from_tag = SOUL_PACKS[1].pack, SOUL_PACKS[1].from_tag
@@ -366,6 +533,7 @@ local function default_clause(kind, ante)
   else
     c.key = pool.values[1]
   end
+  if kind == 'joker' then c.from = 'both' end
   return c
 end
 
@@ -404,14 +572,102 @@ local function label_for(pool, v)
   return tostring(v)
 end
 
+-- A clause's label: its key's name, "by A<N>" for a clause by ante N (a joker
+-- clause, or by = true), " (clean)" for sticker = 'none', "no " before a must-not
+-- (exclude), and a group as "(A or B)": "no The Plant by A3", "Blueprint by A3 (clean)".
 local function describe(c)
-  if c.kind == 'soul_in_pack' then
+  if c.exclude then
+    local pos = {}
+    for k, v in pairs(c) do pos[k] = v end
+    pos.exclude = nil
+    return 'no '..describe(pos)
+  end
+  if c.kind == 'group' then
+    local parts = {}
+    for m, x in ipairs(c.clauses) do parts[m] = describe(x) end
+    return '('..table.concat(parts, ' or ')..')'
+  elseif c.kind == 'soul_in_pack' then
     return 'Soul in '..(c.pack == 'spectral' and 'Spectral' or 'Arcana')..(c.from_tag and '' or ' (shop)')
   elseif c.kind == 'legendary' then
     return c.key and name_of('Joker', c.key) or ('Soul '..tostring(c.index))
   end
-  return label_for(key_pool(c.kind), key_value(c))
+  local s = label_for(key_pool(c.kind), key_value(c))
+  if c.kind == 'joker' or c.by then s = s..' by A'..tostring(c.ante) end
+  if c.sticker == 'none' then s = s..' (clean)' end
+  return s
 end
+
+-- Rows ------------------------------------------------------------------------------
+
+-- The clause list's rows, read off f.clauses each time (never stored): {c, join}
+-- per plain clause, a group's members in its place; join = 'not' for a must-not
+-- (exclude), 'or' for a group member after its first, 'and' otherwise (row 1's
+-- 'and' shows blank). c is the model's own table. A row straight under a 'not' row
+-- is never 'or' here: a group there starts with 'and', which reads right ("not A
+-- and B or C" is not A, and B or C).
+local function rows_of(f)
+  local rows = {}
+  for _, e in ipairs(f.clauses) do
+    if type(e) == 'table' and e.kind == 'group' and type(e.clauses) == 'table' then
+      for m, c in ipairs(e.clauses) do rows[#rows + 1] = {c = c, join = m > 1 and 'or' or 'and'} end
+    else
+      rows[#rows + 1] = {c = e, join = type(e) == 'table' and e.exclude == true and 'not' or 'and'}
+    end
+  end
+  return rows
+end
+
+-- How rows read, without touching their clauses: a list of entries, each the row
+-- indices it holds (two or more: a group) and no = true for a must-not. A 'not'
+-- row stands alone; a row joined by 'or' joins the run above it unless that is a
+-- 'not' row (a must-not is never a group member: the 'or' then starts a run that
+-- the rows below it join); with mode 'any' every row is a plain entry.
+local function entries_of(rows, mode)
+  local out, run = {}, nil
+  for i, r in ipairs(rows) do
+    if mode ~= 'any' and r.join == 'not' then
+      run = nil
+      out[#out + 1] = {i, no = true}
+    elseif run and mode ~= 'any' and r.join == 'or' then
+      run[#run + 1] = i
+    else
+      run = {i}
+      out[#out + 1] = run
+    end
+  end
+  return out
+end
+
+-- The entries as text ("1 2,3 !4"), so two sets of connectors compare.
+local function reading(rows, mode)
+  local parts = {}
+  for k, e in ipairs(entries_of(rows, mode)) do parts[k] = (e.no and '!' or '')..table.concat(e, ',') end
+  return table.concat(parts, ' ')
+end
+
+-- f.clauses for rows (entries_of): a run of rows is one group, a single row a
+-- plain clause, exclude = true on a 'not' row's clause and cleared on every other
+-- (so exclude is true or absent, never false, and mode 'any' drops it).
+local function clauses_of(rows, mode)
+  local out = {}
+  for _, e in ipairs(entries_of(rows, mode)) do
+    if #e == 1 then
+      local c = rows[e[1]].c
+      c.exclude = e.no or nil
+      out[#out + 1] = c
+    else
+      local members = {}
+      for m, i in ipairs(e) do
+        rows[i].c.exclude = nil
+        members[m] = rows[i].c
+      end
+      out[#out + 1] = {kind = 'group', clauses = members}
+    end
+  end
+  return out
+end
+
+local function row_count(f) return #rows_of(f) end
 
 -- Filters ---------------------------------------------------------------------------
 
@@ -447,6 +703,13 @@ local function profile_path()
   return tostring(G.SETTINGS.profile)..'/seedfinder/filters.jkr'
 end
 
+-- Below Black Stake no clause keeps sticker (it would read as without it, and the
+-- extra cycle there has no clean option to show it).
+local function drop_stickers(f)
+  if (f.stake or 1) >= STICKER_STAKE then return end
+  for _, r in ipairs(rows_of(f)) do r.c.sticker = nil end
+end
+
 -- A filter from disk, or nil when it isn't one (an empty clause list is kept: it's
 -- a filter being built).
 local function sane(f)
@@ -463,6 +726,13 @@ local function sane(f)
   local probe = copy(g)
   if #probe.clauses == 0 then probe.clauses = {default_clause('tag')} end
   if not filter.validate(probe) then return nil end
+  -- As the rows show it: at most MAX_CLAUSES rows (a group cut to one member is
+  -- that member), no group under mode any (the same seeds hold), exclude true or
+  -- absent, and no sticker below Black Stake (the same seeds hold).
+  local rows = rows_of(g)
+  for i = #rows, MAX_CLAUSES + 1, -1 do rows[i] = nil end
+  g.clauses = clauses_of(rows, g.mode)
+  drop_stickers(g)
   -- A typed name held as typed (validate made it a string); a blank one is no name.
   if g.named then
     g.name = clean_name(g.name)
@@ -555,9 +825,13 @@ function M.set_filter(f)
   return true
 end
 
--- Every change to the filter goes through here: name, file, and which panel to redraw.
+-- Every change to the filter goes through here: f.clauses rebuilt from the rows
+-- (Groups, Must-not), stickers dropped below Black Stake, name, file, and which
+-- panel to redraw.
 local function changed(redraw)
   local f = M.current()
+  f.clauses = clauses_of(rows_of(f), f.mode)
+  drop_stickers(f)
   rename(f)
   M.save_filters()
   dirty.filter = dirty.filter or redraw
@@ -607,7 +881,7 @@ local function blocked()
   local e = BHCore.env()
   if #e.content > 0 then return 'Searching is off in this game' end
   if e.smods then
-    for _, c in ipairs(M.current().clauses or {}) do
+    for _, c in ipairs(filter.plain_clauses(M.current())) do
       if c.kind == 'boss' or c.edition then return 'Under Steamodded: no boss or edition clauses' end
     end
   end
@@ -855,7 +1129,9 @@ tick = function()
     if dirty.results then dirty.results = false; replace('seedfinder_results', results_def) end
     if dirty.odds then dirty.odds = false; replace('seedfinder_odds', odds_def) end
   end
-  if find_tab_open() and dirty.results then
+  -- The Find tab redraws for new hits, and when the UTC day turns under its Today
+  -- row (so the row always shows the day Play blind / Play routed would start).
+  if find_tab_open() and (dirty.results or os.date('!%Y-%m-%d') ~= today_shown) then
     dirty.results = false
     local but = G.OVERLAY_MENU:get_UIE_by_ID('tab_but_Find')
     if but then G.FUNCS.change_tab(but) end
@@ -920,6 +1196,9 @@ local function cycle(id, labels, values, current, on_change, opts)
     for _, child in ipairs(node.nodes or {}) do retarget(child) end
   end
   retarget(t)
+  -- opts.pad: the padding around and between the arrows and the label (vanilla's
+  -- 0.1), so a crowded row can give the room to the labels instead.
+  if opts.pad then t.nodes[1].config.padding = opts.pad end
   -- create_option_cycle returns a row; a column lets cycles share one.
   return {n=G.UIT.C, config={align = 'cm'}, nodes={t}}
 end
@@ -1000,36 +1279,60 @@ local function stake_options(deck, current)
   return labels, values
 end
 
-local function clause_row(i, c)
+-- Row i's connector: the button joining it to the row above ("and" / "or" /
+-- "not", seedfinder_c<i>_join), on row 1 blank / "not" (seedfinder_c1_not), or an
+-- empty cell of its width under "Any clause" (Groups, Must-not). ROW_PAD: the
+-- clause cycles' padding (cycle's opts.pad), so the room the connector takes comes
+-- out of the gaps around the arrows, not the labels.
+local JOIN_W, ROW_PAD = 0.5, 0.04
+local JOIN_COLOUR = {['and'] = 'GREY', ['or'] = 'BLUE', ['not'] = 'RED'}
+local function join_cell(i, r, f)
+  if f.mode == 'any' then return {n=G.UIT.C, config={minw = JOIN_W, minh = 0.5}} end
+  local label = r.join
+  if i == 1 and label ~= 'not' then label = '' end
+  return button(label, 'seedfinder_join', {id = i == 1 and 'seedfinder_c1_not' or ('seedfinder_c'..i..'_join'),
+    ref_table = {i = i}, w = JOIN_W, h = 0.5, scale = 0.3, colour = G.C[JOIN_COLOUR[r.join] or 'GREY']})
+end
+
+-- Row i of rows_of(f): r.c is the model's clause, edited in place; changed()
+-- then rebuilds f.clauses from the rows. Every cycle redraws the panel, since the
+-- labels (a "by A3", the generated name) can follow any field.
+local function clause_row(i, r, f)
+  local c = r.c
   local kinds_l, kinds_v = {}, {}
   for k, d in ipairs(KINDS) do kinds_l[k], kinds_v[k] = d.label, d.kind end
   local antes_l, antes_v = {}, {}
   if c.kind == 'legendary' then
     antes_l, antes_v = {'Any ante'}, {false}
   else
-    for a = 1, MAX_ANTE do antes_l[a], antes_v[a] = localize('k_ante')..' '..a, a end
+    local word = c.kind == 'joker' and 'By ante' or localize('k_ante')
+    for a = 1, MAX_ANTE do antes_l[a], antes_v[a] = word..' '..a, a end
   end
-  local ex = extra_of(c.kind)
+  local ex = extra_of(c.kind, f.stake)
   local pool = key_pool(c.kind)
   local p = 'c'..i..'_'
-  -- The cycles' w plus their arrows and the X must stay inside the clause list's
-  -- minw (FILTER_W - 0.4, less its padding): a wider row widens the whole overlay.
+  -- The connector, the cycles' w plus their arrows and the X must stay inside the
+  -- clause list's minw (FILTER_W - 0.4, less its padding): a wider row widens the
+  -- whole overlay. finder_groups and finder_mustnot measure every row against it.
   return row({
+    join_cell(i, r, f),
+    -- A new kind keeps the row's connector: a "not" row stays a must-not.
     cycle(p..'kind', kinds_l, kinds_v, c.kind, function(v)
-      local nc = default_clause(v, c.ante)
+      local nc, no = default_clause(v, c.ante), c.exclude
       for k in pairs(c) do c[k] = nil end
       for k, x in pairs(nc) do c[k] = x end
+      c.exclude = no
       changed(true)
-    end, {w = 2.2}),
+    end, {w = 2.3, pad = ROW_PAD}),
     cycle(p..'ante', antes_l, antes_v, c.kind == 'legendary' and false or c.ante, function(v)
-      c.ante = v; changed()
-    end, {w = 1.3}),
-    ex and cycle(p..'extra', ex.labels, ex.values, c[ex.field], function(v)
-      c[ex.field] = v; changed()
-    end, {w = 1.6}) or cycle(p..'extra', {'-'}, {false}, false, nil, {w = 1.6}),
+      c.ante = v; changed(true)
+    end, {w = 1.6, pad = ROW_PAD}),
+    ex and cycle(p..'extra', ex.labels, ex.values, ex.get(c), function(v)
+      ex.set(c, v); changed(true)
+    end, {w = 1.85, pad = ROW_PAD}) or cycle(p..'extra', {'-'}, {false}, false, nil, {w = 1.85, pad = ROW_PAD}),
     cycle(p..'key', pool.labels, pool.values, key_value(c), function(v)
       set_key(c, v); changed(true)
-    end, {w = 2.7}),
+    end, {w = 2.5, pad = ROW_PAD}),
     button('X', 'seedfinder_remove', {id = 'seedfinder_remove_'..i, ref_table = {i = i}, w = 0.55, h = 0.5, scale = 0.35}),
   }, {padding = 0.02})
 end
@@ -1086,9 +1389,22 @@ filter_panel_def = function()
         f.stake = math.min(f.stake or 1, max_stake(v))
         changed(true)
       end, {w = 2.9}),
-      cycle('stake', stake_l, stake_v, f.stake, function(v) f.stake = v; changed() end, {w = 2.9}),
-      cycle('mode', {'All clauses', 'Any clause'}, {'all', 'any'}, f.mode or 'all',
-        function(v) f.mode = v; changed() end, {w = 2.4}),
+      -- Crossing Black Stake redraws: the reroll cycles gain or lose their clean
+      -- options, and a lowered stake drops sticker (changed()).
+      cycle('stake', stake_l, stake_v, f.stake, function(v)
+        local was = (f.stake or 1) >= STICKER_STAKE
+        f.stake = v
+        changed(was ~= (v >= STICKER_STAKE))
+      end, {w = 2.9}),
+      -- Any clause flattens the groups, drops exclude (validate refuses a must-not
+      -- in mode any; the status line says so) and hides the connectors.
+      cycle('mode', {'All clauses', 'Any clause'}, {'all', 'any'}, f.mode or 'all', function(v)
+        local dropped = false
+        for _, r in ipairs(rows_of(f)) do dropped = dropped or (v == 'any' and r.join == 'not') end
+        f.mode = v
+        changed(true)
+        if dropped then status('must-not clauses dropped in Any mode') end
+      end, {w = 2.4}),
     }, {padding = 0.02, minh = ROW2_H}),
     row({
       create_toggle{col = true, label = 'All unlocked', ref_table = f, ref_value = 'all_unlocked', w = 2, scale = 0.8,
@@ -1100,10 +1416,10 @@ filter_panel_def = function()
   if #f.clauses == 0 then
     list[1] = row({text('No clauses yet: add one', 0.35, G.C.UI.TEXT_INACTIVE)}, {minh = 0.8})
   end
-  for i, c in ipairs(f.clauses) do list[#list + 1] = clause_row(i, c) end
+  for i, r in ipairs(rows_of(f)) do list[#list + 1] = clause_row(i, r, f) end
   rows[#rows + 1] = row({
-    {n=G.UIT.C, config={align = 'tm', r = 0.1, padding = 0.08, colour = G.C.L_BLACK, minw = FILTER_W - 0.4,
-      minh = 0.66*MAX_CLAUSES + 0.2}, nodes = list},
+    {n=G.UIT.C, config={id = 'seedfinder_clauses', align = 'tm', r = 0.1, padding = 0.08, colour = G.C.L_BLACK,
+      minw = FILTER_W - 0.4, minh = 0.66*MAX_CLAUSES + 0.2}, nodes = list},
   }, {padding = 0.04})
   rows[#rows + 1] = row({
     button('Add clause', 'seedfinder_add', {w = 3, colour = G.C.GREEN, func = 'seedfinder_can_add'}),
@@ -1359,6 +1675,20 @@ local function play(i, as_hunt)
   G.FUNCS.start_run(nil, {seed = seed, stake = f.stake or 1})
 end
 
+-- The Today row's Play blind / Play routed: daily.play(mode) starts the day's run
+-- (its seed, deck_for's deck, White Stake), seeded like vanilla. A running search is
+-- cancelled first, as a hit's Play does; unseed is cleared, so the Game:start_run
+-- wrap never unseeds a daily.
+local function play_daily(mode)
+  shown = nil
+  status('')
+  cancel_search()
+  close_editor()
+  unseed = nil
+  local ok, err = daily.play(mode)
+  if not ok then print('[SeedFinder] daily '..tostring(mode)..': '..tostring(err)) end
+end
+
 -- The Route panel ---------------------------------------------------------------------
 
 local STEP_SCALE = 0.34
@@ -1487,50 +1817,106 @@ end
 
 -- The Find tab ------------------------------------------------------------------------
 
+-- The tab is TAB_W x TAB_H in every state (before T-378a three hits grew it to
+-- 5.71 tall): the filter box shares its row with Open Seed Finder, the hits area
+-- holds HITS_H (the caption and three rows) whether it lists hits or not, and the
+-- Today box goes below it. finder_today measures each state.
+local BOX_W = TAB_W - 0.6           -- the filter row and the Today box
+local OPEN_W = 1.9                  -- Open Seed Finder, beside the filter box
+local HITS_H = 1.9
+local TODAY_BUTTON_W = 1.8
+local TODAY_NOTE = 'Blind: the Oracle stays locked. Routed: use it.'
+
+-- The day's daily seed (seedfinder.daily): today()'s date and seed, the deck
+-- deck_for says will be played (Red when the day's deck is locked here, with the
+-- reason, cut before its ": playing Red Deck" since the deck line says that),
+-- White Stake, Play blind / Play routed, and what the two modes mean. Both read
+-- one os.time(), so a UTC midnight can't split the seed from the deck.
+local function today_box()
+  local t = os.time()
+  local day = daily.today(t)
+  local deck, reason = daily.deck_for(nil, t)
+  today_shown = day.date
+  local line_w = BOX_W - 0.2
+  local info_w = line_w - TODAY_BUTTON_W - 0.1
+  local left = {align = 'cl', padding = 0.02, maxw = info_w}
+  local rows = {
+    row({
+      {n=G.UIT.C, config={align = 'cl', minw = info_w}, nodes={
+        row({text('Today', 0.32), gap(0.1), text(day.date, 0.3, G.C.UI.TEXT_LIGHT, 'seedfinder_today_date'),
+          text(' UTC', 0.3, G.C.UI.TEXT_INACTIVE)}, left),
+        row({text(day.seed, 0.4, G.C.FILTER, 'seedfinder_today_seed')}, left),
+        row({text(name_of('Back', deck), 0.28, G.C.UI.TEXT_LIGHT, 'seedfinder_today_deck'),
+          text(', '..name_of('Stake', (G.P_CENTER_POOLS.Stake[day.stake] or {}).key), 0.28, G.C.UI.TEXT_LIGHT,
+            'seedfinder_today_stake')}, left),
+      }},
+      {n=G.UIT.C, config={align = 'cm'}, nodes={
+        row({button('Play blind', 'seedfinder_daily_blind', {id = 'seedfinder_daily_blind', w = TODAY_BUTTON_W,
+          h = 0.42, colour = G.C.BLUE, scale = 0.34})}, {padding = 0.02}),
+        row({button('Play routed', 'seedfinder_daily_routed', {id = 'seedfinder_daily_routed', w = TODAY_BUTTON_W,
+          h = 0.42, colour = G.C.PURPLE, scale = 0.34})}, {padding = 0.02}),
+      }},
+    }),
+  }
+  if reason then
+    rows[#rows + 1] = row({text(reason:match('^(.-): playing ') or reason, 0.28, G.C.ORANGE, 'seedfinder_today_reason')},
+      {padding = 0.02, maxw = line_w})
+  end
+  rows[#rows + 1] = row({text(TODAY_NOTE, 0.28, G.C.UI.TEXT_INACTIVE, 'seedfinder_today_note')},
+    {padding = 0.02, maxw = line_w})
+  return row({
+    {n=G.UIT.C, config={id = 'seedfinder_today', align = 'cm', minw = BOX_W, r = 0.1, colour = G.C.BLACK,
+      padding = 0.06}, nodes = rows},
+  }, {padding = 0.02})
+end
+
 local function find_tab_def()
   local f = M.current()
   local body = {
-    row({text('Seed Finder', 0.5)}, {id = 'seedfinder_tab', padding = 0.05}),
+    row({text('Seed Finder', 0.42)}, {id = 'seedfinder_tab', padding = 0.02}),
     row({
-      {n=G.UIT.C, config={align = 'cm', minw = TAB_W - 0.6, minh = 0.9, r = 0.1, colour = G.C.BLACK, padding = 0.08}, nodes={
-        row({text(f.name, 0.4, G.C.UI.TEXT_LIGHT)}, {maxw = TAB_W - 0.8}),
-        row({text(#f.clauses..(#f.clauses == 1 and ' clause, ' or ' clauses, ')..name_of('Back', f.deck)..', '
-          ..name_of('Stake', (G.P_CENTER_POOLS.Stake[f.stake or 1] or {}).key), 0.3, G.C.UI.TEXT_INACTIVE)},
-          {maxw = TAB_W - 0.8}),
+      {n=G.UIT.C, config={align = 'cm', minw = BOX_W - OPEN_W - 0.1, minh = 0.64, r = 0.1, colour = G.C.BLACK,
+        padding = 0.05}, nodes={
+        row({text(f.name, 0.36, G.C.UI.TEXT_LIGHT)}, {maxw = BOX_W - OPEN_W - 0.3}),
+        row({text(row_count(f)..(row_count(f) == 1 and ' clause, ' or ' clauses, ')..name_of('Back', f.deck)..', '
+          ..name_of('Stake', (G.P_CENTER_POOLS.Stake[f.stake or 1] or {}).key), 0.26, G.C.UI.TEXT_INACTIVE)},
+          {maxw = BOX_W - OPEN_W - 0.3}),
       }},
-    }, {padding = 0.05}),
+      gap(0.1),
+      UIBox_button{label = {'Open', 'Seed Finder'}, button = 'seedfinder_open', ref_table = {from = 'play'},
+        colour = G.C.RED, minw = OPEN_W, minh = 0.64, scale = 0.34, col = true},
+    }, {padding = 0.02}),
   }
+  local hits = {}
   if search and #search.found > 0 then
-    body[#body + 1] = caption('Hits for '..search.filter.name, G.C.UI.TEXT_LIGHT)
+    hits[1] = row({text('Hits for '..search.filter.name, 0.28, G.C.UI.TEXT_LIGHT)}, {padding = 0.02, maxw = BOX_W})
     for k = 1, math.min(3, #search.found) do
       local i = ranked(k)
-      body[#body + 1] = row({
-        {n=G.UIT.C, config={align = 'cm', minw = 2.2, minh = 0.55, r = 0.1, colour = G.C.BLACK}, nodes={
+      hits[#hits + 1] = row({
+        {n=G.UIT.C, config={align = 'cm', minw = 2.2, minh = 0.5, r = 0.1, colour = G.C.BLACK}, nodes={
           text(search.found[i], 0.4, G.C.FILTER),
         }},
         gap(0.06),
-        {n=G.UIT.C, config={align = 'cm', minw = 0.8, maxw = 0.8, minh = 0.55}, nodes={
+        {n=G.UIT.C, config={align = 'cm', minw = 0.8, maxw = 0.8, minh = 0.5}, nodes={
           text(short_cost(i), 0.32, G.C.GOLD, 'seedfinder_tabcost_'..i),
         }},
         gap(0.06),
-        button('Play', 'seedfinder_play', {id = 'seedfinder_tabplay_'..i, ref_table = {i = i}, w = 1.3, h = 0.55,
+        button('Play', 'seedfinder_play', {id = 'seedfinder_tabplay_'..i, ref_table = {i = i}, w = 1.3, h = 0.5,
           colour = G.C.BLUE}),
         gap(0.1),
         button('Route', 'seedfinder_route', {id = 'seedfinder_tabroute_'..i, ref_table = {i = i, from = 'tab'},
-          w = 1.3, h = 0.55, colour = G.C.PURPLE}),
-      }, {padding = 0.04})
+          w = 1.3, h = 0.5, colour = G.C.PURPLE}),
+      }, {padding = 0.02})
     end
   elseif search and search.running then
-    body[#body + 1] = row({live_text('status', 0.35)}, {minh = 1})
+    hits[1] = row({live_text('status', 0.35)})
   else
-    body[#body + 1] = row({text('Build a filter, then search seeds for it', 0.33, G.C.UI.TEXT_INACTIVE)}, {minh = 1})
+    hits[1] = row({text('Build a filter, then search seeds for it', 0.33, G.C.UI.TEXT_INACTIVE)})
   end
-  body[#body + 1] = row({
-    UIBox_button{label = {'Open Seed Finder'}, button = 'seedfinder_open', ref_table = {from = 'play'},
-      colour = G.C.RED, minw = TAB_W - 2, minh = 0.8},
-  }, {padding = 0.2})
+  body[#body + 1] = row({{n=G.UIT.C, config={align = 'cm', minh = HITS_H}, nodes = hits}})
+  body[#body + 1] = today_box()
   return {n=G.UIT.ROOT, config={align = 'cm', colour = G.C.CLEAR, minw = TAB_W, minh = TAB_H}, nodes={
-    {n=G.UIT.C, config={align = 'cm', padding = 0.1}, nodes = body},
+    {n=G.UIT.C, config={align = 'cm', padding = 0.06}, nodes = body},
   }}
 end
 
@@ -1692,14 +2078,18 @@ function M.install()
     if sf and sf.on_change then sf.on_change(sf.values[args.to_key]) end
   end
 
+  -- Clause rows (Groups): each edit works on rows_of(f) and writes f.clauses back
+  -- through clauses_of. A new row is joined by "and": a plain clause at the end.
   G.FUNCS.seedfinder_add = function(e)
     local f = M.current()
-    if #f.clauses >= MAX_CLAUSES then return end
-    f.clauses[#f.clauses + 1] = default_clause('tag')
+    local rows = rows_of(f)
+    if #rows >= MAX_CLAUSES then return end
+    rows[#rows + 1] = {c = default_clause('tag'), join = 'and'}
+    f.clauses = clauses_of(rows, f.mode)
     changed(true)
   end
   G.FUNCS.seedfinder_can_add = function(e)
-    if #M.current().clauses >= MAX_CLAUSES then
+    if row_count(M.current()) >= MAX_CLAUSES then
       e.config.colour = G.C.UI.BACKGROUND_INACTIVE
       e.config.button = nil
     else
@@ -1707,12 +2097,52 @@ function M.install()
       e.config.button = 'seedfinder_add'
     end
   end
+  -- Removing the first row of a run hands its connector to the next row: the
+  -- rest of the run stays together, and nothing joins a run it wasn't in. Only an
+  -- "or" is handed over: the next row's own "not" (or "and") is its own.
   G.FUNCS.seedfinder_remove = function(e)
     local i = e and e.config and e.config.ref_table and e.config.ref_table.i
     local f = M.current()
-    if type(i) ~= 'number' or not f.clauses[i] then return end
-    table.remove(f.clauses, i)
+    local rows = rows_of(f)
+    if type(i) ~= 'number' or not rows[i] then return end
+    if rows[i + 1] and rows[i + 1].join == 'or' and (i == 1 or rows[i].join ~= 'or') then rows[i + 1].join = 'and' end
+    table.remove(rows, i)
+    f.clauses = clauses_of(rows, f.mode)
     changed(true)
+  end
+  -- The connector of row i (Must-not): rows 2.. cycle "and" -> "or" -> "not" ->
+  -- "and", row 1 blank <-> "not", each click to the next state that changes the
+  -- filter. An "or" straight under a "not" row can't join it (a must-not is never
+  -- a group member), so it joins the row below instead: that row is pulled into a
+  -- group with row i. With no row below to pull (none, a "not" one, or one already
+  -- joined) that "or" changes nothing and is passed over. A state that would grow
+  -- a group past filter.MAX_GROUP is passed over too (unreachable while
+  -- MAX_CLAUSES <= MAX_GROUP); with none left, the cancel sound.
+  G.FUNCS.seedfinder_join = function(e)
+    local i = e and e.config and e.config.ref_table and e.config.ref_table.i
+    local f = M.current()
+    local rows = rows_of(f)
+    if type(i) ~= 'number' or not rows[i] or f.mode == 'any' then return end
+    local states = i == 1 and {'and', 'not'} or {'and', 'or', 'not'}
+    local at, before = 1, reading(rows, f.mode)
+    for k, s in ipairs(states) do if s == rows[i].join then at = k end end
+    for step = 1, #states - 1 do
+      local try = {}
+      for k, r in ipairs(rows) do try[k] = {c = r.c, join = r.join} end
+      try[i].join = states[(at - 1 + step) % #states + 1]
+      if try[i].join == 'or' and try[i - 1].join == 'not' then
+        try[i].join = 'and'
+        if try[i + 1] and try[i + 1].join ~= 'not' then try[i + 1].join = 'or' end
+      end
+      local fits = true
+      for _, x in ipairs(entries_of(try, f.mode)) do fits = fits and #x <= filter.MAX_GROUP end
+      if fits and reading(try, f.mode) ~= before then
+        f.clauses = clauses_of(try, f.mode)
+        changed(true)
+        return
+      end
+    end
+    play_sound('cancel')
   end
   G.FUNCS.seedfinder_new = function(e)
     close_editor()
@@ -1790,6 +2220,8 @@ function M.install()
     if type(r) == 'table' and type(r.i) == 'number' then open_route(r.i, r.from) end
   end
   G.FUNCS.seedfinder_route_back = function(e) close_route() end
+  G.FUNCS.seedfinder_daily_blind = function(e) play_daily('blind') end
+  G.FUNCS.seedfinder_daily_routed = function(e) play_daily('routed') end
   G.FUNCS.seedfinder_hunt = function(e)
     local i = e and e.config and e.config.ref_table and e.config.ref_table.i
     if type(i) == 'number' then play(i, true) end

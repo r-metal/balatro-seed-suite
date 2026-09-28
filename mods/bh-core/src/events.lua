@@ -3,9 +3,14 @@
 -- API
 --   events.install()      Wraps the vanilla functions below. Idempotent: later
 --                         calls are no-ops.
---   events.on(name, fn)   Subscribes `fn(payload)` to one of `events.NAMES`.
+--   events.on(name, fn)   Subscribes `fn(payload)` to one of `events.ALL`.
 --                         Returns a token. Unknown names are an error.
 --   events.off(token)     Unsubscribes. Safe to call twice, or from a handler.
+--   events.NAMES          The 0.2.0 events, frozen: code that subscribes to
+--                         every name in it and counts each one (the `events`
+--                         scenario) relies on it never growing.
+--   events.ALL            NAMES plus the events added since (0.4.0:
+--                         shop_reroll).
 --
 -- Every hook calls the original with all its arguments first (invariant 3) and
 -- never copies a vanilla body (invariant 2). Nothing fires, and no pending
@@ -48,6 +53,24 @@
 --                   booster pack closes, which must not count. `dollars`
 --                   includes the cash-out payout (`G.GAME.current_round.dollars`,
 --                   which vanilla adds through a queued ease_dollars).
+--                   The shelf is not stocked yet: vanilla fills G.shop_jokers
+--                   in a nested event once the shop has slid in (game.lua:
+--                   3081-3114). A reader of the shop row waits for it.
+--   shop_reroll     `G.FUNCS.reroll_shop` (button_callbacks.lua:2855), the
+--   (0.4.0)         Reroll button. Vanilla empties and refills G.shop_jokers
+--                   inside a queued event, then queues a 0.3 s delay and a
+--                   save_run, so this queues its own event right behind them
+--                   (non-blocking, blockable: it runs only once all three are
+--                   done) and fires with the row as it is then: `cards` = the
+--                   center keys of G.shop_jokers' cards, in slot order, every
+--                   set (Jokers, Tarots, Planets, playing cards). ante and
+--                   round are read at the click, dollars at the firing (the
+--                   reroll's cost already paid). The controller lock vanilla
+--                   sets at the click is released by an event queued behind
+--                   ours, so the player cannot buy from the new row before it
+--                   fires. Only wrapped when G.FUNCS.reroll_shop exists (a
+--                   world without a shop, like the 0.2.0 unit stubs, gets no
+--                   shop_reroll).
 --   ante_change     `ease_ante(mod)` (common_events.lua:191). Vanilla applies
 --                   the change in a queued event, so this queues its own event
 --                   right behind it and fires with the applied ante. `mod` of
@@ -77,8 +100,12 @@ events.NAMES = {
   round_end = true, shop_enter = true, ante_change = true, run_end = true,
 }
 
+-- NAMES plus the events added since 0.2.0 (NAMES itself stays frozen, see API).
+events.ALL = {shop_reroll = true}
+for name in pairs(events.NAMES) do events.ALL[name] = true end
+
 local handlers = {}  -- name -> array of tokens, in subscription order
-for name in pairs(events.NAMES) do handlers[name] = {} end
+for name in pairs(events.ALL) do handlers[name] = {} end
 
 local installed = false
 -- Per-run bookkeeping, reset by run_start.
@@ -106,7 +133,7 @@ local function emit(name, payload)
 end
 
 function events.on(name, fn)
-  assert(events.NAMES[name], 'bhcore.events: unknown event '..tostring(name))
+  assert(events.ALL[name], 'bhcore.events: unknown event '..tostring(name))
   assert(type(fn) == 'function', 'bhcore.events: handler must be a function')
   local token = {name = name, fn = fn, active = true}
   local list = handlers[name]
@@ -124,6 +151,18 @@ function events.off(token)
 end
 
 local function ante() return G.GAME.round_resets.ante end
+
+-- The center keys of the shop's card slots, in slot order (a fresh table).
+local function shop_keys()
+  local out = {}
+  local cards = G.shop_jokers and G.shop_jokers.cards
+  if type(cards) ~= 'table' then return out end
+  for _, c in ipairs(cards) do
+    local key = c.config and c.config.center and c.config.center.key
+    if key then out[#out + 1] = key end
+  end
+  return out
+end
 
 local function end_run(won)
   if run_ended[won] then return end
@@ -224,6 +263,20 @@ function events.install()
       pending_shop = nil
       emit('shop_enter', {ante = p.ante, round = p.round, dollars = p.dollars})
     end)
+
+  if type(G.FUNCS.reroll_shop) == 'function' then
+    wrap(G.FUNCS, 'reroll_shop', function() return {ante = ante(), round = G.GAME.round} end,
+      function(ctx)
+        G.E_MANAGER:add_event(Event({
+          trigger = 'immediate', blocking = false,
+          func = function()
+            emit('shop_reroll', {ante = ctx.ante, round = ctx.round, dollars = G.GAME.dollars,
+              cards = shop_keys()})
+            return true
+          end,
+        }))
+      end)
+  end
 
   wrap(_G, 'ease_ante', function(mod)
     if not mod or mod == 0 then return end

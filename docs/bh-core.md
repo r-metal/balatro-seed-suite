@@ -22,6 +22,9 @@ Module names are `bhcore.*` (see `mods/bh-core/lovely.toml`). `BHCore` is the gl
 | `shop_enter` | the shop opens | `{ante, round, dollars}` |
 | `ante_change` | the ante changes | `{from, to}` |
 | `run_end` | game over or win | `{won = bool, ante, round, seed}` |
+| `shop_reroll` *(added in 0.4.0, T-372a)* | the shop is rerolled (the Reroll button, `G.FUNCS.reroll_shop`), once the new cards are in the shop's card slots | `{ante, round, dollars, cards = {key, ...}}`: `cards` holds the center keys of `G.shop_jokers`' cards after the reroll, in slot order, whatever their set; `dollars` is after the reroll's cost |
+
+*(Added in 0.4.0, T-372a:)* `events.NAMES` stays the eight 0.2.0 events (code that subscribes to every name in it and counts each one relies on that); `events.ALL` is NAMES plus the events added since, and `events.on` takes any name in ALL. `shop_enter` fires before vanilla stocks the shop's card slots (they are filled in a nested event once the shop has slid in, game.lua:3081-3114): a reader of the entry row waits for it.
 
 ## Text inputs (0.3.4)
 

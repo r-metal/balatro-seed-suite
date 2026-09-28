@@ -25,6 +25,12 @@ name = "runjournal.ui"
 
 [[patches]]
 [patches.module]
+source = "src/runinfo.lua"
+before = "main.lua"
+name = "runjournal.runinfo"
+
+[[patches]]
+[patches.module]
 source = "src/init.lua"
 before = "main.lua"
 name = "runjournal.init"

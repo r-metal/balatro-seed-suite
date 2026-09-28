@@ -3,12 +3,14 @@ if SeedFinder then return SeedFinder end
 
 require('bhcore.init')
 
-SeedFinder = {VERSION = '0.3.4'}
+SeedFinder = {VERSION = '0.4.0'}
 SeedFinder.filter = require('seedfinder.filter')
 SeedFinder.engine = require('seedfinder.engine')
 SeedFinder.worker = require('seedfinder.worker')
+SeedFinder.daily = require('seedfinder.daily')
 SeedFinder.ui = require('seedfinder.ui')
 
+SeedFinder.daily.install()
 SeedFinder.ui.install()
 
 return SeedFinder

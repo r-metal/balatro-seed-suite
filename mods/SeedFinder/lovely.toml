@@ -43,6 +43,12 @@ name = "seedfinder.ui"
 
 [[patches]]
 [patches.module]
+source = "src/daily.lua"
+before = "main.lua"
+name = "seedfinder.daily"
+
+[[patches]]
+[patches.module]
 source = "src/init.lua"
 before = "main.lua"
 name = "seedfinder.init"

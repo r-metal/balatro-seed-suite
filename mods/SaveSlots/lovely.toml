@@ -49,6 +49,12 @@ name = "saveslots.practice"
 
 [[patches]]
 [patches.module]
+source = "src/backup.lua"
+before = "main.lua"
+name = "saveslots.backup"
+
+[[patches]]
+[patches.module]
 source = "src/init.lua"
 before = "main.lua"
 name = "saveslots.init"

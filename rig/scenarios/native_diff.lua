@@ -331,7 +331,9 @@ return {
     return true
   end},
 
-  {name = '1M seeds on the workers', timeout = 100, run = function(ctx)
+  -- 240 s: the scan takes 86-93 s while another game loads the machine (the rig is
+  -- niced below it), and 100 s timed out in a full barrier on 2026-09-28.
+  {name = '1M seeds on the workers', timeout = 240, run = function(ctx)
     local busy = false
     for _, w in ipairs(R.workers) do
       local terr = w.thread:getError()

@@ -160,6 +160,11 @@ local function tick()
       rig.menu_at = rig.menu_at or now()
       if now() - rig.menu_at >= MENU_SETTLE then
         say(string.format('main menu up after %.1fs', now() - rig.t0))
+        -- A game controller in use on this machine would drive the rig game too (SDL reads
+        -- /dev/input itself); smoke.sh and lovely-rig.sh hide them with an SDL hint.
+        if love.joystick and love.joystick.getJoystickCount() > 0 then
+          return finish(false, 'a host game controller reaches the rig (is the SDL hint in smoke.sh / lovely-rig.sh?)')
+        end
         rig.phase, rig.step, rig.step_started = 'steps', 1, now()
       end
     elseif now() - rig.t0 > BOOT_TIMEOUT then

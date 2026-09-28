@@ -545,3 +545,99 @@ H.test('joker by ante N, Buffoon pack: all R rerolls, packs up to its slot, the 
   end
   H.ok(seen >= 1 and forced >= 1, 'Buffoon hits at ante >= 2 and in the forced pack: '..seen..', '..forced)
 end)
+
+------------------------------------------------------------------------------
+-- Any-of groups (T-312)
+
+local function deep_eq(a, b, path)
+  path = path or 'r'
+  if type(a) ~= type(b) then error(path..': '..type(a)..' vs '..type(b), 2) end
+  if type(a) ~= 'table' then
+    if a ~= b then error(path..': '..tostring(a)..' vs '..tostring(b), 2) end
+    return
+  end
+  for k, v in pairs(a) do deep_eq(v, b[k], path..'.'..tostring(k)) end
+  for k in pairs(b) do if a[k] == nil then error(path..'.'..tostring(k)..' missing', 2) end end
+end
+
+H.test('group: a group hit is routed as the member that hit, on its own', function()
+  local filter, predict, state = mods()
+  local R = route()
+  local sj = {kind = 'shop_joker', ante = 2, key = 'j_blueprint', rerolls = 3}
+  local tg = {kind = 'tag', ante = 3, blind = 'Small', key = 'tag_juggle'}
+  local f = F({{kind = 'group', clauses = {sj, tg}}})
+  local seen = {0, 0}
+  for i = 1, 200 do
+    local S = world{seed = 'RGROUP'..i}
+    local ok, d = filter.eval(state.copy(S), f)
+    if ok then
+      local m = d.results[1].hit
+      local r = assert(R.build(f, d))
+      local alone = F({m == 1 and sj or tg})
+      local oka, da = filter.eval(state.copy(S), alone)
+      H.eq(oka, true, 'RGROUP'..i..': the member holds alone')
+      deep_eq(r, assert(R.build(alone, da)), 'RGROUP'..i..' member '..m)
+      if m == 2 then
+        H.eq(#r.steps, 0); H.eq(r.cost.ante, 3)
+      else
+        H.eq(r.steps[#r.steps].key, 'j_blueprint')
+        replay(predict, state.copy(S), r)
+      end
+      seen[m] = seen[m] + 1
+    else
+      H.eq(select(2, R.build(f, d)), 'not a hit', 'RGROUP'..i)
+    end
+    if seen[1] >= 3 and seen[2] >= 3 then break end
+  end
+  H.ok(seen[1] > 0 and seen[2] > 0, 'hits on both members: '..seen[1]..', '..seen[2])
+  -- A group result that holds but names no member that held is not a hit.
+  H.eq(select(2, R.build(f, {checked = 1, results = {{ok = true, results = {}}}})), 'not a hit')
+  H.eq(select(2, R.build(f, {checked = 1, results = {{ok = true, hit = 1, results = {{ok = false}}}}})), 'not a hit')
+  -- Mode all: a plain clause beside the group is routed too.
+  local fa = F({{kind = 'group', clauses = {sj, tg}}, {kind = 'pack', ante = 1, key_prefix = 'p_buffoon'}})
+  local both
+  for i = 1, 200 do
+    local S = world{seed = 'RGROUP'..i}
+    local ok, d = filter.eval(state.copy(S), fa)
+    if ok and d.results[1].hit == 1 then
+      local r = assert(R.build(fa, d))
+      H.eq(r.steps[1].ante, 1); H.eq(r.steps[1].when, 'Small', 'the ante-1 pack first')
+      H.eq(r.cost.ante, 2)
+      replay(predict, state.copy(S), r)
+      both = i
+      break
+    end
+  end
+  H.ok(both, 'a mode-all hit on the group\'s shop_joker and the pack')
+end)
+
+H.test('group: a chained ante is routed from details.tag_packs when its from_tag member was not reached', function()
+  local filter, predict, state = mods()
+  local R = route()
+  local f = F({{kind = 'group', clauses = {{kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'},
+      {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}}},
+    {kind = 'pack', ante = 1, key_prefix = 'p_'}})
+  local seen = 0
+  for i = 1, 200 do
+    local S = world{seed = 'RGCHAIN'..i, tags = {'tag_charm', 'tag_juggle'}}
+    local t = predict.tags(state.copy(S), 1)
+    if t.small == 'tag_charm' and t.big == 'tag_juggle' then
+      local ok, d = filter.eval(state.copy(S), f)
+      H.eq(ok, true, 'RGCHAIN'..i)
+      H.eq(d.results[1].hit, 1); H.eq(d.results[1].results[2], nil, 'the from_tag member not reached')
+      local r = assert(R.build(f, d))
+      H.eq(actions(r), 'skip/Small open_pack/Small play/Big buy/shop')
+      H.eq(r.steps[1].text, 'Skip the Small Blind (Charm Tag).')
+      H.eq(r.steps[2].text, 'Open the Mega Arcana Pack and take nothing.')
+      H.eq(r.steps[4].slot, 1); H.eq(r.steps[4].key, 'p_buffoon_normal_1')
+      H.eq(r.cost.ante, 1); H.eq(r.cost.rerolls, 0)
+      replay(predict, state.copy(S), r)
+      -- Without the eval's record the chained ante has no skips to read.
+      local bare = {checked = d.checked, results = d.results}
+      H.eq(select(2, R.build(f, bare)), 'details: no tag packs at chained ante 1')
+      seen = seen + 1
+      if seen >= 2 then break end
+    end
+  end
+  H.ok(seen > 0, 'a Charm Small / Juggle Big seed in 200')
+end)

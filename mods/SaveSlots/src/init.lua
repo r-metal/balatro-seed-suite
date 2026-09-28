@@ -4,17 +4,19 @@ if SaveSlots then return SaveSlots end
 
 require('bhcore.init') -- 0.2: events (auto-checkpoints) and fs come from bh-core
 
-SaveSlots = {VERSION = '0.3.4'}
+SaveSlots = {VERSION = '0.4.0'}
 SaveSlots.store = require('saveslots.store')
 SaveSlots.checkpoint = require('saveslots.checkpoint')
 SaveSlots.preview = require('saveslots.preview')
 SaveSlots.ui = require('saveslots.ui')
 SaveSlots.entry = require('saveslots.entry')
 SaveSlots.practice = require('saveslots.practice')
+SaveSlots.backup = require('saveslots.backup')
 
 SaveSlots.checkpoint.install()
 SaveSlots.ui.install()
 SaveSlots.entry.install()
 SaveSlots.practice.install()
+SaveSlots.backup.install()
 
 return SaveSlots

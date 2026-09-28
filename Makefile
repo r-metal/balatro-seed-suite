@@ -58,7 +58,8 @@ lovely-smoke: dist game-src
 
 LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods \
   lovely_paused_sim:--smods lovely_preview_smods:--smods golden_stable:--smods golden_walk:--smods golden_tagpacks:--smods \
-  text_digits:--smods finder_names:--smods saveslots_folders:--smods
+  text_digits:--smods finder_names:--smods saveslots_folders:--smods saveslots_backup:--smods daily_run:--smods \
+  runjournal_runinfo:--smods runjournal_flags:--smods
 lovely-check: dist game-src
 	@export SMOKE_TIMEOUT=$${SMOKE_TIMEOUT:-600}; fail=0; for e in $(LOVELY_MATRIX); do rig/lovely-rig.sh $${e%%:*} $${e#*:} || fail=1; done; \
 	  if [ -d tools/pokermon ]; then rig/lovely-rig.sh lovely_content_mod --smods --mod tools/pokermon || fail=1; \

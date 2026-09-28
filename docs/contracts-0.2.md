@@ -41,6 +41,23 @@ Additive, like 0.2. The index version stays 1, and a 0.3.3 build reads an index 
   - The overlay keeps one outer size in every state and fits `G.ROOM`.
 - Proofs: `tests/test_store_folders.lua` and the `saveslots_folders` scenario.
 
+### SaveSlots 0.4.0: profile backups (T-374, added 2026-09-28)
+
+New module `saveslots.backup`; the full API is in its header. In short:
+- **What a backup holds:** the profile's progress files, `<profile>/profile.jkr` and `<profile>/meta.jkr`, copied byte for byte into `<profile>/saveslots/backups/<stamp>-<kind>/`, with a `backup.jkr` manifest written last. A folder without a manifest is no backup, and the next take sweeps it.
+- **What it never holds:** save.jkr, Save Slots' own slots or the Journal.
+- **When backups are taken:** one `'auto'` backup the first time a profile loads each day, once the game's pending writes are on disk. The newest 7 autos are kept. `'manual'` backups are never pruned.
+- **API:** `take(kind[, reason])`, `list()` (newest first), `delete(id)`, `can_restore()`, `restore(id[, on_done])`, `when_settled(fn)`, `settled()`, `step()`, `install()`, `valid_id(id)`. None of them raise.
+- **Restore** works from the main menu only, with two presses in the UI. It:
+  1. waits for pending profile writes;
+  2. takes a `'manual'` safety backup (reason `'before restore'`);
+  3. writes the backup's files through bhcore.fs, putting the safety copy back on any failure;
+  4. reloads through vanilla's own profile switch with a data reset (`G.focused_profile = G.SETTINGS.profile`, then `G.FUNCS.load_profile(true)`).
+
+  Vanilla's `load_profile` merges file keys into memory, and `save_progress` writes memory back out, so writing the files alone would be undone by the next save.
+- **UI:** a **Backups** button beside Import code opens a panel in the preview's place, with a list, **Back up now**, **Restore** (the first press arms "Confirm restore") and **Delete**. The overlay keeps its outer size.
+- **Proofs:** `tests/test_backup.lua`, and the `saveslots_backup` scenario. The scenario checks that memory, and the files after the game's next `save_progress`, equal the backup.
+
 ## RunJournal (T-123, T-125): new mod `mods/RunJournal`, modules `runjournal.*`
 
 - Subscribes to bh-core events only. Per run it writes `<profile>/runjournal/<file>.jkr` (bhcore.fs) plus `index.jkr`, where `run_id = <seed>..':'..<start os.time>`. *(Amended after wave D: the file name replaces `:` with `_` because `:` is illegal on Windows/Proton, and the time part of the id is bumped past a same-second collision; `started_at` keeps the real time.)* A loaded run continues its record (match the seed and the latest unfinished record).
@@ -48,6 +65,54 @@ Additive, like 0.2. The index version stays 1, and a 0.3.3 build reads an index 
 - `runjournal.stats(filter?)` → `{runs, wins, win_rate, by_deck = {...}, by_stake = {...}, by_joker = {[key] = {runs, wins}}}`. "Build archetype" in 0.2.0 means the joker set at the run's end, grouped by any user-selected joker key.
 - `runjournal.export(fmt)` with `fmt = 'csv'|'json'` writes `<profile>/runjournal/export-<os.time>.<fmt>` and returns the path. CSV has one row per run.
 - UI (T-125): a "Run Journal" button in Options/pause, and an overlay with the stats summary, per-deck/stake tables, a joker lookup, the list of recent runs, and Export buttons.
+
+### RunJournal 0.4.0: run flags (T-370, added 2026-09-28)
+
+Additive record and index fields, so stats can leave runs out (T-371) without reading every record. The index version stays 1. A record or an index entry without the new fields counts as a normal run: nothing rewrites an old record or index on load; an entry gains the fields when its run is next written, and a rebuilt index derives them from the records.
+- Record fields:
+  - `seeded` (boolean): `G.GAME.seeded == true` as the run is actually played. The Finder's Play and Save Slots' Import Play clear `seeded` *after* `start_run` returns, but bh-core's `run_start` fires inside `start_run`, where it is still true. So the recorder sets it on every write of the live record (`round_end`, `shop_enter`, `run_end`), never at `run_start`; until the first write the live record has none. A loaded run's `seeded` comes back with its save, so its record keeps its value.
+  - `challenge` (string or nil): `G.GAME.challenge`, the challenge id. Set at `run_start` and refreshed on every write.
+  - `endless` (boolean): false until a round ends after the run was won, then true for good. The winning round itself is not endless: `run_end` (won) and its `round_end` can fire in either order, so the recorder compares round numbers. A run loaded with `G.GAME.won` already true counts from its next round. `won` stays true through endless, as before.
+  - `origin` grows: `recorder.set_origin(o)` keeps `filter_name` (any string), `kind` (`'finder'` | `'daily'` | `'import'`), `date` (`'YYYY-MM-DD'`) and `mode` (`'blind'` | `'routed'`). Any other key, a non-string value and a value outside those sets is dropped. The Finder's Play keeps calling `set_origin{filter_name = ...}`; an origin with a `filter_name` counts as `kind = 'finder'`.
+- Index entries carry `seeded` (boolean), `challenge` (id or nil), `endless` (boolean), `finder` (boolean: `origin.filter_name`, or `origin.kind == 'finder'`) and `daily` (boolean: `origin.kind == 'daily'`). Entries still carry no `origin` table. `recorder.save(record)` derives them from the record it is given, so a synthetic record without them is a normal run.
+- Proofs: `tests/test_runjournal_flags.lua` and the `runjournal_flags` scenario.
+
+### RunJournal 0.4.0: stats filters and the Jokers tab (T-371, added 2026-09-28)
+
+Research pick [21]. By default the Journal's screen counts normal runs only; toggles bring the others back. Additive: a bare `runjournal.stats()` and the 0.3 table filters count every run as before.
+- **Kinds.** `stats.kind_of(run)` gives a run one kind, the first that applies of `'daily'`, `'finder'`, `'challenge'`, `'seeded'`, else nil (normal). It reads an index entry's T-370 flags, or derives them from a record the way the recorder derives an entry's. A daily run is seeded too, and still only the Daily toggle shows it. An entry without flags (recorded before 0.4.0) is normal, and so is an endless run.
+- **The filter.** `stats.compute(filter)`'s table filter gains `include = {seeded, finder, challenge, daily}` (booleans), beside `deck` and `stake`. With `include` present, a kind whose field is missing or false is left out. Without `include`, nothing is left out. `stats.DEFAULT_FILTER = {include = {seeded = false, finder = false, challenge = false, daily = false}}`; `stats.KINDS` lists the fields.
+- **The endless reload.** Reloading a won endless run starts a new record whose `won` is nil (T-370's known gap). An entry with `endless = true` and `won` not true counts in `unfinished`, never as a loss, in every call.
+- **`stats.jokers(filter?, runs?, read?)`** gives one row per joker key seen in a counted run (finished and passing the filter), at its end or at any shop: `{key, runs, wins, win_rate, held, lifespan}`. `runs`, `wins` and `win_rate` are counted as `by_joker` counts them (the run's end set). `held` counts the runs where a `jokers_seen` snapshot has the joker. `lifespan` is the mean number of shops it was held, over those runs (nil when `held` is 0). Every key is listed, not a top N. `runs` defaults to `recorder.list()`, and an entry's record is read through `read` (default `recorder.read`; the UI passes a per-open cache). `stats.sort_jokers(rows, by, name_of?)` sorts by `'runs'`, `'win_rate'` or `'lifespan'`, highest first, ties by name.
+- **`stats.by_filter`** (Hunts) takes no filter: hunts are Finder runs by definition.
+- **UI.**
+  - A filter bar tops Overview, Decks/Stakes and a new **Jokers** tab (after Decks/Stakes). It holds toggles Seeded, Finder, Challenge and Daily (off: hidden), a deck cycle (All, then each deck in the index) and a stake cycle (All, then 1-8).
+  - The bar keeps one state for the session, starting from `DEFAULT_FILTER`. A change recomputes the numbers, and the Overview's joker lookup follows it.
+  - The Jokers tab is a paged table (name, runs, wins, win rate, held, lifespan) with a Runs / Win rate / Lifespan sort.
+  - Six tabs fit the width of the old five: their buttons are narrowed, and ids and labels are unchanged. The overlay keeps one outer size (15.74 x 9.45 in the rig's 20 x 11.5 room) on every tab and in every filter state.
+- Proofs: `tests/test_runjournal_filters.lua` and the `runjournal_filters` scenario.
+
+### RunJournal 0.4.0: the daily list and the pick rate (T-378b, added 2026-09-28)
+
+Closes research picks [25] (the daily seed's runs in the Journal) and T-372 (pick rate when offered). Additive: `stats.compute()` returns what it returned before, with or without a filter.
+- **`stats.dailies(runs?, read?)`** lists the daily seed's runs, newest first (`started_at`, then `run_id`). A run is daily when it is a record whose `origin.kind == 'daily'`, or an index entry with `daily = true` (T-370). Several runs of one date are each listed; nothing is collapsed. Each row is `{run_id, date, mode, seed, deck, stake, won, final_ante, started_at, ended_at}`:
+  - `date` is `origin.date` (the UTC day the seed was picked for), else the UTC date of `started_at`;
+  - `mode` is `origin.mode` (`'blind'` | `'routed'`), else nil;
+  - `won` is true (won), false (finished without a win) or nil (unfinished; the endless reload counts as unfinished, as in `compute`).
+
+  Entries carry no origin, so a daily entry's record is read through `read` (default `recorder.read`); only daily entries are read. An unreadable record keeps its row, with the date from `started_at` and no mode. It takes no filter.
+- **`stats.jokers`** rows gain `offered`, `picked` and `pick_rate`:
+  - `offered` counts the runs whose record's `offered` (T-372a) has the joker;
+  - `picked` counts those where it was also held at some shop (a `jokers_seen` snapshot has it, as `held` counts);
+  - `pick_rate = picked / offered`, nil when `offered` is 0.
+
+  They count only runs whose record has an `offered` table (0.4.0 or later). An older run still counts in `runs`, `wins` and `held`, never in the pick rate. A joker only offered, never held or kept, now gets a row too (`runs = 0`). `stats.sort_jokers` also sorts by `'pick_rate'`; a nil sorts last, and ties go by name.
+- **UI.**
+  - A seventh tab, **Daily**, after Hunts: date, Blind / Routed, seed, deck and result (`Won`, `Ante N` for a run lost at ante N, `Unfinished`), 7 per page with a page cycle (`runjournal_dpage_cycle`). It reads "No daily runs yet" when there are none. The list is not filtered: the bar's Daily toggle only decides whether daily runs count in the other tabs' numbers.
+  - The Jokers table gains a **Pick** column: a percentage, or `-` when no counted run has offered data for the joker. The sort cycle gains **Pick rate**.
+  - The tab row stays 14.75 wide, as with six tabs. Instead of one narrowed width, each tab button is fitted to its label: the narrow ones share one width and the wide ones hug their label. Every label keeps vanilla's tab text scale (0.5). With six equal buttons, 'Decks/Stakes' had been drawn at about 0.7 of it. Tab ids and labels are unchanged (`tab_but_<label>`).
+  - The overlay keeps its outer size (15.74 x 9.45 in the rig's 20 x 11.5 room) on all seven tabs.
+- Proofs: `tests/test_runjournal_daily.lua` and the `runjournal_daily` scenario.
 
 ## SeedOracle (T-110): new mod `mods/SeedOracle`, modules `seedoracle.*`
 

@@ -95,7 +95,7 @@ EOF
 
 status=0
 nice -n "${SMOKE_NICE:-15}" timeout -k 5 "$WALL_TIMEOUT" headless-run --res 1280x720 -- \
-  env XDG_DATA_HOME="$out/home" LOVELY_MOD_DIR="$out/Mods" ALSOFT_DRIVERS=null \
+  env XDG_DATA_HOME="$out/home" LOVELY_MOD_DIR="$out/Mods" ALSOFT_DRIVERS=null SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT=0x0000/0x0000 \
   LD_LIBRARY_PATH="$LOVE_DIR/lib" \
   bash -c 'LD_PRELOAD="$3" exec "$0" "$1" >>"$2" 2>&1' "$LOVE_DIR/bin/love" "$ROOT/build/game" "$out/log.txt" "$LOVELY" \
   >"$out/headless.txt" 2>&1 || status=$?

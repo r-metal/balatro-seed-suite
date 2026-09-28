@@ -1025,3 +1025,408 @@ H.test('joker clause is evaluated last; a chained ante skips its pack-tag blinds
   end
   H.ok(chained > 0, 'a joker hit on a chained ante: '..chained)
 end)
+
+------------------------------------------------------------------------------
+-- Any-of groups (T-312): {kind = 'group', clauses = {plain clause, ...}}.
+
+local function grp(...) return {kind = 'group', clauses = {...}} end
+
+H.test('group: validate accepts 2..MAX_GROUP plain members of every kind; antes counts the members', function()
+  world()
+  local filter = mods()
+  H.eq(filter.MAX_GROUP, 6)
+  local tag = {kind = 'tag', ante = 1, key = 'tag_charm'}
+  local sj5 = {kind = 'shop_joker', ante = 5, key = 'j_joker'}
+  H.eq(filter.validate(F({grp(tag, sj5)})), true, 'a group as the only clause')
+  -- Every plain kind as a member, six at a time, beside a plain clause, both modes.
+  local kinds = {}
+  for i, c in ipairs(EVERY_KIND) do kinds[i] = c end
+  kinds[#kinds + 1] = {kind = 'joker', ante = 2, key = 'j_blueprint', rerolls = 1, from = 'buffoon', edition = 'foil'}
+  for s = 1, #kinds - 5 do
+    local g = {kind = 'group', clauses = {}}
+    for k = s, s + 5 do g.clauses[#g.clauses + 1] = kinds[k] end
+    for _, mode in ipairs{'all', 'any'} do
+      H.eq(filter.validate(F({tag, g}, {mode = mode, antes = 3})), true, 'members '..s..'..'..(s + 5)..' '..mode)
+    end
+  end
+  -- antes defaults to the highest ante, members included, and bounds them.
+  H.eq(filter.validate(F({tag, grp(tag, sj5)})), true, 'antes from a member')
+  local ok, err = filter.validate(F({tag, grp(tag, sj5)}, {antes = 4}))
+  H.eq(ok, nil)
+  H.ok(err:find('clause 2, member 2 (shop_joker): ante must be an integer 1..4', 1, true), err)
+  -- plain_clauses: members in their group's place, written order.
+  local a, b = {kind = 'boss', ante = 1, key = 'bl_hook'}, {kind = 'voucher', ante = 1, key = 'v_hone'}
+  local p = filter.plain_clauses(F({tag, grp(a, b), sj5}))
+  H.eq(#p, 4)
+  H.ok(p[1] == tag and p[2] == a and p[3] == b and p[4] == sj5, 'plain clauses in order')
+end)
+
+H.test('group: validate rejects nesting, empty, singleton and oversize groups, and bad members by path', function()
+  world()
+  local filter = mods()
+  local tag = {kind = 'tag', ante = 1, key = 'tag_charm'}
+  local big = {kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'}
+  local seven = {kind = 'group', clauses = {}}
+  for i = 1, 7 do seven.clauses[i] = tag end
+  local bad = {
+    {grp(tag, grp(tag, big)), 'clause 2, member 2: a group cannot hold a group'},
+    {grp(grp(tag, big), tag), 'clause 2, member 1: a group cannot hold a group'},
+    {{kind = 'group', clauses = {}}, 'clause 2 (group): needs 2..6 members, has 0'},
+    {grp(tag), 'clause 2 (group): needs 2..6 members, has 1'},
+    {seven, 'clause 2 (group): needs 2..6 members, has 7'},
+    {{kind = 'group'}, 'clause 2 (group): clauses must be a list'},
+    {{kind = 'group', clauses = 'x'}, 'clause 2 (group): clauses must be a list'},
+    {{kind = 'group', clauses = {tag, big, [4] = tag}}, 'clause 2 (group): clauses must be a list'},
+    {{kind = 'group', clauses = {tag, big}, ante = 1}, 'clause 2 (group): unknown field ante'},
+    {grp(tag, big, {kind = 'tag', ante = 1, key = 'tag_missing'}), 'clause 2, member 3 (tag): unknown tag tag_missing'},
+    {grp(tag, 'x'), 'clause 2, member 2: not a table'},
+    {grp(tag, {kind = 'nope', ante = 1}), 'clause 2, member 2: unknown kind nope'},
+    {grp(tag, {kind = 'joker', ante = 1, key = 'j_caino'}), 'clause 2, member 2 (joker): j_caino is a legendary'},
+    {grp(tag, {kind = 'shop_joker', ante = 1, key = 'j_joker', rerolls = 21}), 'clause 2, member 2 (shop_joker): rerolls must be'},
+    {grp(tag, {kind = 'tag', ante = 1, key = 'tag_charm', extra = 1}), 'clause 2, member 2 (tag): unknown field extra'},
+  }
+  for _, b in ipairs(bad) do
+    local ok, err = filter.validate(F({tag, b[1]}))
+    H.eq(ok, nil, b[2])
+    H.ok(type(err) == 'string' and err:find(b[2], 1, true), 'err: '..tostring(err))
+  end
+  -- A group is refused inside a group even when it is the first clause.
+  local ok, err = filter.validate(F({grp(grp(tag, big), big)}))
+  H.eq(ok, nil); H.ok(err:find('clause 1, member 1: a group cannot hold a group', 1, true), tostring(err))
+end)
+
+H.test('group: serialize / deserialize round-trip; a nested group is refused on load', function()
+  world()
+  local filter = mods()
+  local f = F({{kind = 'boss', ante = 2, key = 'bl_wall'},
+    grp({kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true},
+      {kind = 'joker', ante = 3, key = 'j_blueprint', rerolls = 2, from = 'shop', edition = 'foil'},
+      {kind = 'legendary', index = 1})}, {mode = 'all', stake = 2})
+  local s = assert(filter.serialize(f))
+  local g = assert(filter.deserialize(s))
+  deep_eq(g, f)
+  H.eq(g.clauses[2].kind, 'group'); H.eq(#g.clauses[2].clauses, 3)
+  H.eq(filter.validate(g), true)
+  local tag = {kind = 'tag', ante = 1, key = 'tag_charm'}
+  local nested = F({grp(tag, grp(tag, tag))})
+  local n, err = filter.serialize(nested)
+  H.eq(n, nil); H.ok(err:find('member 2', 1, true), tostring(err))
+  local l, lerr = filter.deserialize(STR_PACK(nested))
+  H.eq(l, nil); H.ok(lerr:find('member 2', 1, true), tostring(lerr))
+end)
+
+-- A group's details against its members evaluated alone (the same state):
+-- it holds iff some member holds alone; hit is the first member in `order`
+-- (the evaluation order) that holds alone; every member up to it reads what it
+-- reads alone; none after it is evaluated.
+local function check_group(filter, state, S, g, order, where)
+  local ok, d = filter.eval(state.copy(S), F({g}))
+  local r = d.results[1]
+  local any, hit = false, nil
+  for _, m in ipairs(order) do
+    local alone_ok, alone = filter.eval(state.copy(S), F({g.clauses[m]}))
+    any = any or alone_ok
+    if hit then
+      H.eq(r.results[m], nil, where..': member '..m..' after the hit')
+    else
+      deep_eq(r.results[m], alone.results[1], where..' member '..m)
+      if alone_ok then hit = m end
+    end
+  end
+  H.eq(ok, any, where)
+  H.eq(r.ok, ok, where..' ok'); H.eq(r.hit, hit, where..' hit')
+  H.eq(d.checked, 1)
+  return hit
+end
+
+H.test('group: eval equals any of its members evaluated alone (tag + shop_joker + soul_in_pack, 200 seeds)', function()
+  local filter, _, state = mods()
+  -- Members written most expensive first. The Soul member: from a Charm tag
+  -- pack in one group, from the ante-1 shops in the other.
+  local G1 = grp({kind = 'shop_joker', ante = 2, key = 'j_blueprint', rerolls = 2},
+    {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true},
+    {kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'})
+  local G2 = grp({kind = 'soul_in_pack', ante = 1, pack = 'arcana'},
+    {kind = 'tag', ante = 2, blind = 'Small', key = 'tag_economy'},
+    {kind = 'shop_joker', ante = 2, key = 'j_ceremonial', rerolls = 1})
+  local seen = {{}, {}}
+  for i = 1, 200 do
+    local S = world{seed = 'GROUP'..i, tags = {'tag_charm', 'tag_juggle', 'tag_economy'}}
+    local h1 = check_group(filter, state, S, G1, {3, 2, 1}, 'GROUP'..i..' G1')
+    local h2 = check_group(filter, state, S, G2, {2, 1, 3}, 'GROUP'..i..' G2')
+    seen[1][h1 or 0], seen[2][h2 or 0] = true, true
+  end
+  for gi = 1, 2 do
+    for m = 0, 3 do H.ok(seen[gi][m], 'G'..gi..': saw '..(m == 0 and 'a miss' or 'member '..m..' as the hit')) end
+  end
+end)
+
+H.test('group: members run cheapest first and stop at the first hit; the group sorts as its cheapest member', function()
+  local filter, predict, state = mods()
+  local S = world{seed = 'GORDER'}
+  local tags, v1 = predict.tags(state.copy(S), 1), predict.voucher(state.copy(S), 1)
+  local legend = predict.legendaries(state.copy(S), 1)[1].key
+  local miss = (tags.small == 'tag_juggle') and 'tag_economy' or 'tag_juggle'
+  local vmiss = v1 == 'v_hone' and 'v_grabber' or 'v_hone'
+  local lmiss = legend == 'j_caino' and 'j_yorick' or 'j_caino'
+  -- MAX_GROUP members, written most expensive first. The from_tag member
+  -- never holds (no Ethereal Tag before ante 2).
+  local function six(tag, voucher, leg)
+    return grp({kind = 'joker', ante = 2, key = 'j_joker'},
+      {kind = 'shop_joker', ante = 1, key = 'j_joker', rerolls = 1},
+      {kind = 'soul_in_pack', ante = 1, pack = 'spectral', from_tag = true},
+      {kind = 'legendary', index = 1, key = leg},
+      {kind = 'voucher', ante = 1, key = voucher},
+      {kind = 'tag', ante = 1, blind = 'Small', key = tag})
+  end
+  local function members(r)
+    local n = 0
+    for _ in pairs(r.results) do n = n + 1 end
+    return n
+  end
+  local function first(log, pat)
+    for i, k in ipairs(log) do if k:find(pat) then return i end end
+  end
+  -- The tag holds: nothing past 'Tag1' is drawn.
+  local log, ok, d = streams(function() return filter.eval(state.copy(S), F({six(tags.small, vmiss, lmiss)})) end)
+  H.eq(ok, true); H.eq(d.results[1].hit, 6); H.eq(members(d.results[1]), 1)
+  H.ok(drew(log, '^Tag1$') and not drew(log, '^Voucher') and not drew(log, 'Joker4') and not drew(log, '^cdt')
+    and not drew(log, 'shop_pack'), 'only the tag drawn: '..table.concat(log, ' '))
+  -- The tag misses, the voucher holds.
+  log, ok, d = streams(function() return filter.eval(state.copy(S), F({six(miss, v1, lmiss)})) end)
+  H.eq(ok, true); H.eq(d.results[1].hit, 5); H.eq(members(d.results[1]), 2)
+  H.eq(d.results[1].results[6].ok, false)
+  H.ok(first(log, '^Tag1$') < first(log, '^Voucher1$'), 'tag before voucher')
+  H.ok(not drew(log, 'Joker4') and not drew(log, '^cdt'), 'nothing past the voucher: '..table.concat(log, ' '))
+  -- Then the legendary, drawn on a copy of S since later members read S.
+  local T = state.copy(S)
+  log, ok, d = streams(function() return filter.eval(T, F({six(miss, vmiss, legend)})) end)
+  H.eq(ok, true); H.eq(d.results[1].hit, 4); H.eq(members(d.results[1]), 3)
+  H.eq(T.game.pseudorandom.Joker4, nil, 'Joker4 untouched in S')
+  H.ok(not drew(log, '^cdt') and not drew(log, 'shop_pack'), 'no shop walked')
+  -- Nothing cheap holds: the shop members run last, in class order.
+  log, ok, d = streams(function() return filter.eval(state.copy(S), F({six(miss, vmiss, lmiss)})) end)
+  local r = d.results[1]
+  for m = 3, 6 do H.eq(r.results[m].ok, false, 'member '..m..' evaluated and missed') end
+  H.ok(r.results[2] or r.results[1], 'a shop member evaluated')
+  H.ok(first(log, '^Tag1$') < first(log, '^Voucher1$') and first(log, '^Voucher1$') < first(log, 'Joker4')
+    and first(log, 'Joker4') < first(log, '^cdt1$'), 'tag, voucher, legendary, then the shop: '..table.concat(log, ' '))
+  if r.hit == 2 then H.eq(r.results[1], nil, 'the joker member after the shop_joker hit') end
+  -- Top level: the group sorts as its tag, ahead of a boss clause written
+  -- first; when every member misses, 'all' ends before the boss is drawn.
+  local f = F({{kind = 'boss', ante = 1, key = 'bl_wall'},
+    grp({kind = 'legendary', index = 1, key = lmiss}, {kind = 'tag', ante = 1, blind = 'Small', key = miss})})
+  log, ok, d = streams(function() return filter.eval(state.copy(S), f) end)
+  H.eq(ok, false); H.eq(d.checked, 1); H.eq(d.results[1], nil, 'boss never evaluated')
+  H.eq(d.results[2].results[1].ok, false); H.eq(d.results[2].results[2].ok, false); H.eq(d.results[2].hit, nil)
+  H.ok(first(log, '^Tag1$') < first(log, 'Joker4') and not drew(log, '^boss$'), table.concat(log, ' '))
+  -- Ties by ante: a group whose cheapest member is an ante-2 tag runs after
+  -- an ante-1 tag clause.
+  local f2 = F({grp({kind = 'voucher', ante = 1, key = v1}, {kind = 'tag', ante = 2, key = 'tag_juggle'}),
+    {kind = 'tag', ante = 1, blind = 'Small', key = miss}})
+  local ok2, d2 = filter.eval(state.copy(S), f2)
+  H.eq(ok2, false); H.eq(d2.checked, 1); H.eq(d2.results[1], nil, 'the group waits for the ante-1 tag')
+end)
+
+H.test('group: members share one walk; a one-group filter equals its members in mode any', function()
+  local filter, _, state = mods()
+  local g = grp({kind = 'joker', ante = 2, key = 'j_greedy_joker', rerolls = 1, from = 'buffoon'},
+    {kind = 'soul_in_pack', ante = 1, pack = 'arcana'},
+    {kind = 'shop_joker', ante = 1, key = 'j_blueprint', rerolls = 3})
+  local seen = {}
+  for i = 1, 60 do
+    local S = world{seed = 'GMERGE'..i}
+    local log, ok, d = streams(function() return filter.eval(state.copy(S), F({g})) end)
+    local oka, da = filter.eval(state.copy(S), F(g.clauses, {mode = 'any'}))
+    H.eq(ok, oka, 'GMERGE'..i)
+    local r = d.results[1]
+    for m = 1, 3 do
+      if da.results[m] then deep_eq(r.results[m], da.results[m], 'GMERGE'..i..' member '..m)
+      else H.eq(r.results[m], nil, 'GMERGE'..i..' member '..m..' not evaluated') end
+      if da.results[m] and da.results[m].ok then H.eq(r.hit, m) end
+    end
+    -- Ante 1 is walked once for both shop members (R = 3, packs opened), ante
+    -- 2 once more when the joker member runs.
+    local p1, p2 = 0, 0
+    for _, k in ipairs(log) do
+      if k == 'shop_pack1' then p1 = p1 + 1 elseif k == 'shop_pack2' then p2 = p2 + 1 end
+    end
+    H.eq(p1, 3, 'GMERGE'..i..': ante 1 walked once (2 shops x 2 packs, the forced Buffoon undrawn)')
+    local j = r.results[1]
+    H.ok(p2 == ((j and (not j.ok or j.ante == 2)) and 6 or 0), 'GMERGE'..i..': ante 2 walked once, only for the joker: '..p2)
+    seen[r.hit or 0] = true
+  end
+  H.ok(seen[3] and seen[0], 'saw a shop_joker hit and a miss')
+  H.ok(seen[1], 'saw the joker member as the hit')
+end)
+
+H.test('group: a chained ante is walked for a from_tag member never reached; details.tag_packs records it', function()
+  local filter, predict, state = mods()
+  local f = F({grp({kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'},
+      {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}),
+    {kind = 'pack', ante = 1, key_prefix = 'p_'}})
+  local found = 0
+  for i = 1, 200 do
+    local S = world{seed = 'GCHAIN'..i, tags = {'tag_charm', 'tag_juggle'}}
+    local t = predict.tags(state.copy(S), 1)
+    if t.small == 'tag_charm' and t.big == 'tag_juggle' then
+      local ok, d = filter.eval(state.copy(S), f)
+      H.eq(ok, true, 'GCHAIN'..i)
+      H.eq(d.results[1].hit, 1); H.eq(d.results[1].results[2], nil, 'the from_tag member not reached')
+      -- By hand: the Charm Small skipped (its pack opened), the Big's shop the
+      -- ante's only one, holding the run's forced Buffoon.
+      local T = state.copy(S)
+      local w = predict.ante_walk(T, 1, {tags = predict.tags(T, 1), skip = {Small = true, Big = false},
+        cards = false, open = false})
+      H.eq(#w.shops, 1); H.eq(w.shops[1].after, 'Big')
+      H.eq(d.results[2].shop, 1); H.eq(d.results[2].slot, 1); H.eq(d.results[2].pack, w.shops[1].packs[1].key)
+      local tp = d.tag_packs and d.tag_packs[1]
+      H.ok(tp, 'GCHAIN'..i..': tag packs recorded for chained ante 1')
+      H.eq(#tp, 1); H.eq(tp[1].blind, 'Small'); H.eq(tp[1].tag, 'tag_charm'); H.eq(tp[1].pack, 'p_arcana_mega_1')
+      for k, c in ipairs(w.tag_packs[1].cards) do H.eq(tp[1].cards[k], c.key, 'card '..k) end
+      found = found + 1
+      if found >= 3 then break end
+    end
+  end
+  H.ok(found > 0, 'a Charm Small / Juggle Big seed in 200')
+  -- Separate branches record nothing: no ante here is chained.
+  local _, d = filter.eval(world{seed = 'GCHAIN1', tags = {'tag_charm', 'tag_juggle'}},
+    F({{kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}, {kind = 'pack', ante = 2, key_prefix = 'p_'}}))
+  H.eq(d.tag_packs, nil)
+end)
+
+H.test('group: odds.sample counts a group as one clause', function()
+  local filter, _, state = mods()
+  local odds = require('seedfinder.odds')
+  local base = world()
+  local function at(seed)
+    local T = state.copy(base)
+    T.game.pseudorandom = {seed = seed, hashed_seed = pseudohash(seed)}
+    return T
+  end
+  local function eval(f1, seed) return filter.eval(at(seed), f1) end
+  local g = grp({kind = 'tag', ante = 1, blind = 'Small', key = 'tag_juggle'},
+    {kind = 'shop_joker', ante = 1, key = 'j_greedy_joker'})
+  local v = {kind = 'voucher', ante = 1, key = 'v_hone'}
+  local f = F({g, v})
+  local seeds = {}
+  for i = 1, 60 do seeds[i] = 'GODDS'..i end
+  local counts = odds.sample(f, seeds, eval)
+  H.eq(#counts.clauses, 2, 'the group is one clause')
+  local want = {0, 0}
+  local full = 0
+  for _, seed in ipairs(seeds) do
+    if eval(F({g}), seed) then want[1] = want[1] + 1 end
+    if eval(F({v}), seed) then want[2] = want[2] + 1 end
+    if eval(f, seed) then full = full + 1 end
+  end
+  H.eq(counts.clauses[1], want[1]); H.eq(counts.clauses[2], want[2]); H.eq(counts.full, full)
+  H.ok(want[1] > 0 and want[1] < #seeds, 'the group both holds and misses: '..want[1])
+  local est = assert(odds.estimate(counts))
+  H.ok(est.expected_seeds > 0)
+end)
+
+-- The Soul's edition reads 'edisou'..A. A group can walk shops, draw tag
+-- packs on S, or end before a boss / voucher member is drawn, all ahead of a
+-- legendary step; A is fixed by f (header: legendaries), so the step reads
+-- what a plain clause in its place reads, whichever members ran. Editions are
+-- made common (edition_rate 10) so a wrong ante shows.
+H.test('group: a legendary edition reads the same ante whichever members ran or walked (300 seeds)', function()
+  local filter, predict, state = mods()
+  local function leg(S, ante)
+    local T = state.copy(S)
+    T.game.round_resets.ante = ante
+    return predict.legendaries(T, 2)[1]
+  end
+  local function same(r, want, where)
+    H.ok(r, where..': evaluated')
+    H.eq(r.key, want.key, where..' key'); H.eq(r.edition, want.edition, where..' edition')
+  end
+  local function first(log, pat)
+    for i, k in ipairs(log) do if k:find(pat) then return i end end
+    return math.huge
+  end
+  local walk3 = {kind = 'pack', ante = 3, key_prefix = 'p_'}
+  local moved, reached3, seen = 0, 0, {}
+  for i = 1, 300 do
+    local w = 'GLEG'..i
+    local S = world{seed = w}
+    S.game.edition_rate = 10
+    local want1, want2 = leg(S, 1), leg(S, 2)
+    if want1.edition ~= leg(S, 3).edition then moved = moved + 1 end
+    local LE = {kind = 'legendary', index = 1, edition = want1.edition or 'foil'}
+    local alone_ok = filter.eval(state.copy(S), F({LE}))
+    local miss = predict.tags(state.copy(S), 1).small == 'tag_juggle' and 'tag_economy' or 'tag_juggle'
+    local tag1 = {kind = 'tag', ante = 1, blind = 'Small', key = miss}
+    -- (1) The group's tag misses and its pack member walks antes 1..3 before
+    -- the top-level legendary: it reads as it does alone, drawn before the
+    -- walk moved S.
+    local log, ok, d = streams(function() return filter.eval(state.copy(S), F({grp(tag1, walk3), LE})) end)
+    H.eq(d.results[1].hit, 2, w..' (1): the walk ran')
+    H.ok(first(log, '^Joker4$') < first(log, '^shop_pack3$'), w..' (1) legendaries before the walk: '..table.concat(log, ' '))
+    same(d.results[2], want1, w..' (1)')
+    H.eq(ok, alone_ok, w..' (1) ok')
+    -- (2) A legendary member of a second group, after that walk: the group
+    -- holds iff a member holds alone, and reads as it does on its own.
+    local G2 = grp(LE, {kind = 'pack', ante = 2, key_prefix = 'p_celestial'})
+    ok, d = filter.eval(state.copy(S), F({grp(tag1, walk3), G2}))
+    same(d.results[2].results[1], want1, w..' (2)')
+    local g_ok, gd = filter.eval(state.copy(S), F({G2}))
+    deep_eq(d.results[2], gd.results[1], w..' (2) details')
+    H.eq(ok, g_ok, w..' (2) ok')
+    H.eq(g_ok, alone_ok or filter.eval(state.copy(S), F({G2.clauses[2]})), w..' (2) any member alone')
+    -- (3) No shop needs: the from_tag member's packs are drawn on S itself
+    -- (ante 3) before the legendary ('any': reached when the group misses).
+    log, ok, d = streams(function()
+      return filter.eval(state.copy(S), F({grp(tag1, {kind = 'soul_in_pack', ante = 3, pack = 'arcana', from_tag = true}), LE},
+        {mode = 'any'}))
+    end)
+    H.ok(first(log, '^Joker4$') < first(log, '^shop_pack3$'), w..' (3) legendaries before the tag packs: '..table.concat(log, ' '))
+    if d.results[2] then
+      same(d.results[2], want1, w..' (3)')
+      reached3 = reached3 + 1
+    end
+    -- (4) The tag member at ante 3 ends the group before the boss member is
+    -- drawn, or misses and the boss holds: A is the boss's ante (1) either way.
+    local G4 = grp({kind = 'tag', ante = 3, key = 'tag_juggle'},
+      {kind = 'boss', ante = 1, key = predict.boss(state.copy(S), 1)})
+    ok, d = filter.eval(state.copy(S), F({G4, LE}))
+    same(d.results[2], want1, w..' (4)')
+    H.eq(ok, alone_ok, w..' (4) ok')
+    seen[d.results[1].hit] = true
+    -- (5) A above 1: a voucher member at ante 2 fixes A = 2 whether or not the
+    -- walk runs, as a plain voucher clause in its place does.
+    local vmiss = predict.voucher(state.copy(S), 2) == 'v_hone' and 'v_grabber' or 'v_hone'
+    local V2 = {kind = 'voucher', ante = 2, key = vmiss}
+    ok, d = filter.eval(state.copy(S), F({grp(V2, walk3), LE}))
+    H.eq(d.results[1].hit, 2, w..' (5): the walk ran')
+    same(d.results[2], want2, w..' (5)')
+    local _, dp = filter.eval(state.copy(S), F({V2, LE}, {mode = 'any'}))
+    same(dp.results[2], want2, w..' (5) plain')
+  end
+  H.ok(moved > 0, 'the ante moves the Soul edition on some seeds: '..moved)
+  H.ok(reached3 > 0, '(3) reached')
+  H.ok(seen[1] and seen[2], '(4) held by the tag and by the boss')
+end)
+
+H.test('group: odds.sample counts agree with full evals for a legendary edition after a group walk', function()
+  local filter, _, state = mods()
+  local odds = require('seedfinder.odds')
+  local base = world()
+  local function eval(f1, seed)
+    local T = state.copy(base)
+    T.game.pseudorandom = {seed = seed, hashed_seed = pseudohash(seed)}
+    T.game.edition_rate = 10
+    return filter.eval(T, f1)
+  end
+  -- The group always holds (every ante-3 shop has packs), by its tag or by
+  -- the walk: the full filter passes exactly when the legendary does.
+  local f = F({grp({kind = 'tag', ante = 1, blind = 'Small', key = 'tag_juggle'}, {kind = 'pack', ante = 3, key_prefix = 'p_'}),
+    {kind = 'legendary', index = 1, edition = 'any'}})
+  local seeds = {}
+  for i = 1, 120 do seeds[i] = 'GLODDS'..i end
+  local counts = odds.sample(f, seeds, eval)
+  H.eq(counts.clauses[1], #seeds, 'the group always holds')
+  H.eq(counts.full, counts.clauses[2], 'full = the legendary alone')
+  H.ok(counts.clauses[2] > 0 and counts.clauses[2] < #seeds, 'the legendary both holds and misses: '..counts.clauses[2])
+end)

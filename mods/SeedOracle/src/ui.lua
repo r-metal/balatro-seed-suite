@@ -5,9 +5,14 @@
 --   ui.install()               wraps the entry points below. Runs once.
 --   ui.open(from_pause)        opens the overlay for the live run (a no-op
 --                              outside a run or inside a sim). Back returns to
---                              the pause menu when `from_pause`.
---   ui.close()                 closes it the way its Back button would.
+--                              the pause menu when `from_pause`. In a blind
+--                              daily it shows the lock note instead and
+--                              returns false (Daily lock, below).
+--   ui.close()                 closes the overlay, or the lock note, the way
+--                              its Back button would.
 --   ui.is_open()               whether the Oracle overlay is up.
+--   ui.locked()                whether the live run is a blind daily.
+--   ui.lock_shown()            whether the lock note is up.
 --   G.FUNCS.seedoracle_open(e) the Options/pause button.
 --
 -- Entry points (both wrap vanilla, call the original with every argument and
@@ -18,9 +23,17 @@
 --                          rows hold the Settings button. SaveSlots' wrapper
 --                          puts its button right after Settings, so the two
 --                          coexist in either wrap order.
---   Controller:key_press_update   ctrl+o (either ctrl) toggles the overlay in a
---                          run, unless a text input has the keyboard or another
---                          overlay is up.
+--   Controller:key_press_update   ctrl+o (either ctrl) toggles the overlay (or
+--                          the lock note) in a run, unless a text input has
+--                          the keyboard or another overlay is up.
+--
+-- Daily lock (T-377): while G.GAME.bh_daily (seedfinder.daily: {date, mode},
+--   saved with the run) has mode 'blind', both entry points open a small note
+--   instead of the overlay: "Daily blind run: the Oracle is locked" (a
+--   create_UIBox_generic_options with id seedoracle_locked; its Back returns to
+--   the pause menu when opened from there). Nothing is predicted for it
+--   (oracle.get is not called). The check is at open time only: a 'routed'
+--   daily and every other run open the Oracle as before.
 --
 -- Overlay: one tab per ante (current + next 2), as create_tabs tabs. A tab has
 --   the stable row (skip tags, boss, voucher, the Soul's legendary) and the
@@ -74,6 +87,8 @@ local BADGES = {
   unverified = {'unverified', 'ORANGE'},  -- Steamodded picks bosses its own way
 }
 local NOTE = 'if...: if nothing else consumes the stream first'
+local LOCK_ID = 'seedoracle_locked'
+local LOCKED_MSG = 'Daily blind run: the Oracle is locked'
 
 local installed = false
 local from_pause = false
@@ -90,6 +105,17 @@ end
 function M.is_open()
   return G.OVERLAY_MENU ~= nil and G.OVERLAY_MENU ~= true
     and G.OVERLAY_MENU:get_UIE_by_ID(ROOT_ID) ~= nil
+end
+
+-- Daily lock (header).
+function M.locked()
+  local d = type(G.GAME) == 'table' and G.GAME.bh_daily
+  return type(d) == 'table' and d.mode == 'blind'
+end
+
+function M.lock_shown()
+  return G.OVERLAY_MENU ~= nil and G.OVERLAY_MENU ~= true
+    and G.OVERLAY_MENU:get_UIE_by_ID(LOCK_ID) ~= nil
 end
 
 -- Runs fn with the live-run fields that building display objects writes put
@@ -549,8 +575,25 @@ local function refresh_later()
   }))
 end
 
+-- The lock note (header: Daily lock), in place of the overlay.
+local function show_locked()
+  G.SETTINGS.paused = true
+  G.FUNCS.overlay_menu{definition = create_UIBox_generic_options{
+    back_func = from_pause and 'options' or 'exit_overlay_menu',
+    contents = {
+      row({text(LOCKED_MSG, 0.5, G.C.UI.TEXT_LIGHT)}, {id = LOCK_ID, padding = 0.15}),
+      row({text('A routed daily, or any other run, opens it', 0.32, G.C.UI.TEXT_LIGHT)}, {padding = 0.05}),
+    },
+  }}
+end
+
 function M.open(pause)
   if not in_run() or in_sim() then return false end
+  if M.locked() then
+    from_pause = pause and true or false
+    show_locked()
+    return false
+  end
   local model, pending = oracle.get()
   if not model then return false end
   from_pause = pause and true or false
@@ -562,7 +605,7 @@ function M.open(pause)
 end
 
 function M.close()
-  if not M.is_open() then return end
+  if not (M.is_open() or M.lock_shown()) then return end
   if from_pause then G.FUNCS.options() else G.FUNCS.exit_overlay_menu() end
 end
 
@@ -648,7 +691,7 @@ function M.install()
     local r = orig_key(self, key, ...)
     if key == 'o' and not self.locks.frame and not self.text_input_hook
         and (self.held_keys['lctrl'] or self.held_keys['rctrl']) and in_run() then
-      if M.is_open() then
+      if M.is_open() or M.lock_shown() then
         M.close()
       elseif not G.OVERLAY_MENU then
         M.open(false)

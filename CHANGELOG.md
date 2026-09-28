@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-09-28
+
+Alternatives and must-nots in filters, a daily seed, profile backups, and much deeper stats.
+
+- **Seed Finder: alternatives in filters.** Join clause rows with **or** to make "a Voucher *or* a Joker by ante N" (rows joined by **or** are one either/or group; **and** combines the groups). One level only: no groups inside groups.
+- **Seed Finder: "by ante N"** for Vouchers and skip tags (the Voucher or tag shows up in any ante up to N), and the **Joker by ante** clause (any shop or Buffoon pack up to ante N) in the clause editor.
+- Seed Finder: clause rows are a little more compact, to make room for the and/or connector.
+- **Seed Finder: must-not clauses, "Boss by ante N" and "no sticker".** A clause row's connector now cycles **and / or / not**: a **not** row must *not* happen (for example no The Hook by ante 2). Bosses take **At ante / By ante**. From Black Stake up, shop and "by ante" jokers can ask for a **clean** copy (no eternal, perishable or rental sticker).
+- **Run Journal: stats filters and a Jokers tab.** By default the stats count only normal runs; toggles bring back seeded, Finder, challenge and daily runs, and deck and stake filters narrow them. The new **Jokers** tab lists every joker with its runs, wins, win rate when held at the end, the runs it was held in, and how many shops it lasted, sortable.
+- **Run Info: a History tab.** Every ante so far: which blinds you played or skipped (and the tag you took), and which bosses you beat. It only shows what you've already seen.
+- **Save Slots: profile backups.** Your progress, unlocks and stats are backed up automatically once a day (the last 7 kept), and **Back up now** takes one any time. **Restore** (main menu only, press twice) brings a backup back, after taking a safety copy of your current progress.
+- **The daily seed.** The Play screen's **Find** tab has a **Today** row: each UTC day picks one seed and one deck, at White Stake (Red Deck when the day's deck is locked on your profile). **Play blind** keeps the Oracle locked for that run; **Play routed** lets you use it. Dailies are seeded runs, so they don't count for unlocks or high scores. The Run Journal's new **Daily** tab lists them with their result.
+- **Run Journal: pick rate.** The Jokers tab gets a **Pick** column: of the runs whose shops offered a joker, the share that took it (counted from 0.4.0 on, since older runs didn't record what shops offered). It sorts too.
+- Seed Finder: from Black Stake up, the reroll options read `R0` .. `R5` and `R0 clean` .. `R5 clean`, so they stay legible.
+- Run Journal: runs record whether they were seeded, started from the Finder, a challenge, a daily or endless, for the coming stats filters.
+
 ## 0.3.4 — 2026-09-28
 
 Organise your filters and saves.

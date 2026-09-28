@@ -18,7 +18,9 @@
 --           Favorite / Unfavorite toggle, target, notes and (0.3.4) folder, each
 --           with an Edit button beside its title, and a hunt's filter name. Below
 --           it, level with the action row, "New practice" opens the practice
---           composer (practice.lua) and "Import code" (0.3) reads a share code.
+--           composer (practice.lua), "Import code" (0.3) reads a share code and
+--           "Backups" (0.4) opens the backups panel; three to a row, the two longer
+--           labels on two lines, so the row keeps its 0.3.4 width.
 --   search  (0.3.4) the list follows the search text as it is typed: store.list's
 --           query (name, seed, deck, notes, target, folder; a plain substring,
 --           any case), ANDed with the kind and folder cycles. A new query goes back
@@ -28,6 +30,17 @@
 --           line under the buttons. "Import code" decodes the clipboard into a
 --           panel in the preview's place: seed / deck / stake / notes, with
 --           Play / Cancel in the action row (or the decode error and Cancel).
+--   backups (0.4, T-374; saveslots.backup does the work) a panel in the preview's
+--           place and outer size, opened like the import panel: this profile's
+--           backups, newest first, BACKUP_ROWS a page (a page cycle past that), one
+--           row each: date and time, kind (Automatic / Manual / Before restore) and
+--           the size of what it holds (", no unlocks" when it has no meta.jkr), and a
+--           message line. The action row: Back up now, and on a selected backup
+--           Restore and Delete (each arms "Confirm ..." first, as Delete does for a
+--           slot), and Close. Restore works from the main menu only: elsewhere its
+--           press says so and arms nothing. A restore reloads the profile (vanilla's
+--           profile switch takes the overlay down with the old main menu), then the
+--           overlay is built again with the panel open and "Profile restored".
 --   The list, the preview, the buttons, the meta column, the page cycle and the
 --   search input are UIBoxes inside G.UIT.O nodes ('saveslots_list',
 --   'saveslots_detail', 'saveslots_actions', 'saveslots_meta', 'saveslots_pages',
@@ -76,6 +89,17 @@
 --                         import panel; a bad code shows the error (cancel sound)
 --   saveslots_import_play starts an unseeded run on the code's seed, deck, stake
 --   saveslots_import_cancel closes the import panel (as leaving the editor does)
+--   saveslots_backups     (0.4) opens the backups panel (closing the editor or import)
+--   saveslots_backup_select a backup row; e.config.ref_table.id is the backup id
+--   saveslots_backup_now  backup.take('manual') once the game's pending profile save
+--                         is on disk (backup.when_settled); selects the new backup
+--   saveslots_backup_restore first press arms ("Confirm restore"), second calls
+--                         backup.restore. Off the main menu it arms nothing and the
+--                         panel says why. Any other panel action disarms it.
+--   saveslots_backup_delete first press arms ("Confirm delete"), second deletes
+--   saveslots_backups_close closes the panel
+--   saveslots_backups_page_cycle / saveslots_backups_page the panel's page cycle
+--                         (renamed arrows, as the kind cycle's)
 --   saveslots_search_watch (a func, run every frame on the search row) swaps the
 --                         list and the page cycle when the search text changed;
 --                         saveslots_cursor is the name and search inputs' cursor
@@ -101,8 +125,8 @@
 --   * Only one 'option_cycle' button and one 'select_text_input' may precede
 --     the page cycle and the name input in the tree: 0.1.0 callers (and the
 --     ui_flow scenario) find them as the first of their kind. Hence the renamed
---     kind- and folder-cycle arrows, the search input after the name input, and
---     the meta inputs existing only in the editor.
+--     kind-, folder- and backups-page-cycle arrows, the search input after the name
+--     input, and the meta inputs existing only in the editor.
 --   * One text input per UIBox: vanilla registers one element per draw_layer per
 --     box, so a second input in a box hides the first. The search input has its
 --     own box; the editor's input lives in the detail box. The name and search
@@ -124,10 +148,15 @@
 --     here clears it once start_run returns, only for the seed Play just started
 --     (`unseed`), and never for a loaded savetext. The truncated code ends in
 --     '...': the game font has no ellipsis glyph.
+--   * Backups (0.4) never touch profile files here: saveslots.backup does, through
+--     bhcore.fs. The panel keeps the detail panel's DETAIL_W x DETAIL_H in every
+--     state (BACKUP_ROWS rows, the page cycle's row and the message line are
+--     always reserved), so opening it never resizes the overlay.
 local store = require('saveslots.store')
 local checkpoint = require('saveslots.checkpoint')
 local preview = require('saveslots.preview')
 local sharecode = require('saveslots.sharecode')
+local backup = require('saveslots.backup')
 
 local ui = {}
 
@@ -145,6 +174,7 @@ local ROW_H = 0.62
 local DETAIL_W, DETAIL_H = 8, 7.3
 local ACTION_W = 1.7     -- one action button; 4 of them + gaps fit in DETAIL_W
 local META_W = 3.4       -- the meta column beside the preview, DETAIL_H high
+local META_BUTTON_W = (META_W - 0.2)/3  -- New practice / Import code / Backups under it
 local META_CHARS = 17    -- meta text wraps at this many chars per line
 local CODE_CHARS = 18    -- the share code line shows this many chars, then '...'
 
@@ -178,9 +208,11 @@ local PICK_COLS = 3
 -- `query` the search input's. `kind` indexes FILTERS; `folder` is the folder
 -- cycle's choice: nil (All folders), false (Unfiled) or a folder name. `editing`
 -- is nil, 'target', 'notes' or 'folder'. `share` is the last code copied, {id,
--- code}; `import` the open import panel, {t = decoded} or {err = message}.
+-- code}; `import` the open import panel, {t = decoded} or {err = message};
+-- `backups` the open backups panel, {page, selected, confirm_restore,
+-- confirm_delete, msg, busy} (ids are backup ids).
 local state = {name = '', page = 1, selected = nil, confirm_delete = nil, kind = 1,
-  folder = nil, query = '', editing = nil, edit_text = '', share = nil, import = nil}
+  folder = nil, query = '', editing = nil, edit_text = '', share = nil, import = nil, backups = nil}
 local shown_query = nil  -- the query the list was last built for (the search watch compares)
 local unseed = nil       -- the seed Import's Play started, until its start_run clears `seeded`
 local imported = false   -- set only once an import fully succeeded; a failure or partial retries next open
@@ -661,11 +693,115 @@ local function import_def()
   }}
 end
 
+-- Profile backups (0.4, T-374) ---------------------------------------------------
+
+local BACKUP_ROWS = 7              -- backups per page of the panel
+local BACKUP_ROW_W, BACKUP_ROW_H = DETAIL_W - 1, 0.5
+local own_cycle                    -- (defined with the kind cycle, below)
+
+-- "812 B", "14.2 KB".
+local function size_text(bytes)
+  bytes = tonumber(bytes) or 0
+  if bytes < 1024 then return bytes..' B' end
+  return string.format('%.1f KB', bytes/1024)
+end
+
+-- The size of what a backup holds, and which file it lacks (a fresh profile's).
+local function holds_text(b)
+  local s = size_text(b.size)
+  if not b.sizes.meta then return s..', no unlocks' end
+  if not b.sizes.profile then return s..', unlocks only' end
+  return s
+end
+
+local function backup_kind_text(b)
+  if b.reason == 'before restore' then return 'Before restore' end
+  return b.kind == 'auto' and 'Automatic' or 'Manual'
+end
+
+-- One backup: date and time, kind and size, styled like a slot row (a click selects
+-- it; `chosen` draws the challenge-list marker).
+local function backup_row(b)
+  local when = b.taken_at > 0 and os.date('%Y-%m-%d  %H:%M', b.taken_at) or '?'
+  return {n=G.UIT.R, config={align = 'cm', padding = 0.03}, nodes={
+    {n=G.UIT.C, config={id = 'saveslots_backup_'..b.id, align = 'cm', minw = BACKUP_ROW_W, minh = BACKUP_ROW_H,
+        padding = 0.04, r = 0.1, hover = true, shadow = true, colour = b.kind == 'auto' and G.C.BLUE or G.C.GREEN,
+        button = 'saveslots_backup_select', ref_table = {id = b.id},
+        chosen = (state.backups.selected == b.id) and 'vert' or nil}, nodes={
+      -- three columns and two gaps: 2.3 + 0.1 + 1.9 + 0.1 + 2.1, a margin inside BACKUP_ROW_W
+      {n=G.UIT.C, config={align = 'cm', minw = 2.3, maxw = 2.3}, nodes={
+        {n=G.UIT.T, config={text = when, scale = 0.34, colour = G.C.UI.TEXT_LIGHT, shadow = true}},
+      }},
+      {n=G.UIT.B, config={w = 0.1, h = 0.1}},
+      {n=G.UIT.C, config={align = 'cm', minw = 1.9, maxw = 1.9}, nodes={
+        {n=G.UIT.T, config={text = backup_kind_text(b), scale = 0.32, colour = G.C.UI.TEXT_LIGHT}},
+      }},
+      {n=G.UIT.B, config={w = 0.1, h = 0.1}},
+      {n=G.UIT.C, config={align = 'cm', minw = 2.1, maxw = 2.1}, nodes={
+        {n=G.UIT.T, config={text = holds_text(b), scale = 0.32, colour = G.C.UI.TEXT_LIGHT}},
+      }},
+    }},
+  }}
+end
+
+-- The backups panel, in the preview's place and outer size: a title, what a backup
+-- holds, a page of rows (always BACKUP_ROWS high), the page cycle's row and the
+-- message line (both reserved when empty), so it never changes size.
+local function backups_def()
+  local bk = state.backups
+  local list = backup.list()
+  local pages = math.max(1, math.ceil(#list/BACKUP_ROWS))
+  bk.page = math.min(math.max(1, bk.page or 1), pages)
+  local rows = {}
+  for i = (bk.page - 1)*BACKUP_ROWS + 1, math.min(#list, bk.page*BACKUP_ROWS) do
+    rows[#rows+1] = backup_row(list[i])
+  end
+  if #rows == 0 then
+    rows[1] = {n=G.UIT.R, config={align = 'cm', padding = 0.1}, nodes={
+      {n=G.UIT.T, config={id = 'saveslots_backups_empty', text = 'No backups yet', scale = 0.4,
+        colour = G.C.UI.TEXT_LIGHT}},
+    }}
+  end
+  local cycle = {}
+  if pages > 1 then
+    local opts = {}
+    for i = 1, pages do opts[i] = localize('k_page')..' '..i..'/'..pages end
+    cycle[1] = own_cycle({id = 'saveslots_backups_pages', scale = 0.6, h = 0.3, w = 2.6, options = opts,
+      opt_callback = 'saveslots_backups_page', current_option = bk.page, colour = G.C.BLUE, no_pips = true},
+      'saveslots_backups_page_cycle', 0.05)
+  end
+  local msg = {}
+  if bk.msg then
+    msg[1] = {n=G.UIT.T, config={id = 'saveslots_backups_msg', text = bk.msg, scale = 0.34, colour = G.C.WHITE,
+      shadow = true}}
+  end
+  local function line(text)
+    return {n=G.UIT.R, config={align = 'cm', maxw = DETAIL_W - 0.6}, nodes={
+      {n=G.UIT.T, config={text = text, scale = 0.3, colour = G.C.UI.TEXT_LIGHT}},
+    }}
+  end
+  return {n=G.UIT.ROOT, config={align = 'cm', colour = G.C.BLACK, minw = DETAIL_W, minh = DETAIL_H, r = 0.1}, nodes={
+    {n=G.UIT.C, config={align = 'cm', padding = 0.08}, nodes={
+      {n=G.UIT.R, config={align = 'cm'}, nodes={
+        {n=G.UIT.T, config={text = 'Profile backups', scale = 0.55, colour = G.C.UI.TEXT_LIGHT, shadow = true}},
+      }},
+      line('Progress, unlocks and stats of this profile. Save slots are not in them.'),
+      line('One is made the first time the profile loads each day; the last '..backup.KEEP_AUTO..' are kept.'),
+      {n=G.UIT.R, config={align = 'tm', minh = BACKUP_ROWS*(BACKUP_ROW_H + 0.14), minw = BACKUP_ROW_W + 0.2}, nodes={
+        {n=G.UIT.C, config={align = 'tm'}, nodes=rows},
+      }},
+      {n=G.UIT.R, config={align = 'cm', minh = 0.5}, nodes=cycle},
+      {n=G.UIT.R, config={align = 'cm', minh = 0.36, maxw = DETAIL_W - 0.4}, nodes=msg},
+    }},
+  }}
+end
+
 -- The right-hand panel as a live UIBox. preview.build (and building its
 -- definition into a UIBox) is guarded: any error shows a message instead, and
 -- the list stays usable.
 local function detail_box(slots, parent)
   local cfg = {offset = {x = 0, y = 0}, align = 'cm', parent = parent}
+  if state.backups then return UIBox{definition = backups_def(), config = cfg} end
   if state.import then return UIBox{definition = import_def(), config = cfg} end
   local slot = state.selected and find_slot(slots, state.selected)
   if not slot then
@@ -699,9 +835,30 @@ local function button(label, fn, colour, id)
     minw = ACTION_W, minh = 0.66, scale = #lines > 1 and 0.3 or 0.4})
 end
 
+-- The selected backup, when it is still listed.
+local function selected_backup()
+  local bk = state.backups
+  if not (bk and bk.selected) then return nil end
+  for _, b in ipairs(backup.list()) do
+    if b.id == bk.selected then return b end
+  end
+end
+
 local function actions_def(slots)
   local nodes = {}
-  if state.import then
+  if state.backups then
+    local bk = state.backups
+    nodes[1] = button({'Back up', 'now'}, 'saveslots_backup_now', G.C.GREEN, 'saveslots_backup_now')
+    if selected_backup() then
+      local armed = bk.confirm_restore == bk.selected
+      nodes[#nodes+1] = button(armed and {'Confirm', 'restore'} or 'Restore', 'saveslots_backup_restore',
+        armed and darken(G.C.BLUE, 0.25) or G.C.BLUE, 'saveslots_backup_restore')
+      armed = bk.confirm_delete == bk.selected
+      nodes[#nodes+1] = button(armed and {'Confirm', 'delete'} or 'Delete', 'saveslots_backup_delete',
+        armed and darken(G.C.RED, 0.25) or G.C.RED, 'saveslots_backup_delete')
+    end
+    nodes[#nodes+1] = button('Close', 'saveslots_backups_close', G.C.RED, 'saveslots_backups_close')
+  elseif state.import then
     if state.import.t then nodes[1] = button('Play', 'saveslots_import_play', G.C.BLUE) end
     nodes[#nodes+1] = button('Cancel', 'saveslots_import_cancel', G.C.RED)
   elseif state.editing and state.selected and find_slot(slots, state.selected) then
@@ -728,7 +885,7 @@ local CYCLE_SCALE, FOLDER_CYCLE_W = 0.6, 3.7
 -- Rules). The controller clicks cycle arrows by position
 -- (focused.children[1]/[3]), not by name, so pads still work.
 -- `pad` replaces the cycle's own padding (0.1), to fit two cycles in one row.
-local function own_cycle(args, button, pad)
+function own_cycle(args, button, pad)
   local t = create_option_cycle(args)
   local function retarget(node)
     if type(node) ~= 'table' then return end
@@ -878,14 +1035,21 @@ local function overlay_def(slots, folders)
         {n=G.UIT.R, config={align = 'cm', minw = META_W, minh = DETAIL_H}, nodes={
           {n=G.UIT.O, config={id = 'saveslots_meta', object = Moveable()}},
         }},
-        -- 0.2: the practice composer (practice.lua registers the callback). Beside the
-        -- action row, so the overlay doesn't grow.
+        -- 0.2: the practice composer (practice.lua registers the callback), 0.3 Import
+        -- code, 0.4 Backups. Beside the action row, so the overlay doesn't grow. The
+        -- row keeps 0.3.4's width: a row's padding goes around and between its
+        -- children (engine/ui.lua calculate_xywh), so two buttons of (META_W - 0.3)/2,
+        -- a 0.1 gap and four paddings of 0.08 made META_W + 0.12; three buttons of
+        -- (META_W - 0.2)/3 with the four paddings as gaps make the same. The longer
+        -- labels take two lines, and a label may use all but 0.1 of its button
+        -- (UIBox_button's own maxw leaves 0.2, which squeezes "practice").
         {n=G.UIT.R, config={align = 'cm', padding = 0.08, minh = 0.8}, nodes={
-          UIBox_button({id = 'saveslots_practice', label = {'New practice'}, button = 'saveslots_practice',
-            colour = G.C.GREEN, minw = (META_W - 0.3)/2, minh = 0.66, scale = 0.34, col = true}),
-          {n=G.UIT.B, config={w = 0.1, h = 0.1}},
-          UIBox_button({id = 'saveslots_import', label = {'Import code'}, button = 'saveslots_import',
-            colour = G.C.BLUE, minw = (META_W - 0.3)/2, minh = 0.66, scale = 0.34, col = true}),
+          UIBox_button({id = 'saveslots_practice', label = {'New', 'practice'}, button = 'saveslots_practice',
+            colour = G.C.GREEN, minw = META_BUTTON_W, maxw = META_BUTTON_W - 0.1, minh = 0.66, scale = 0.3, col = true}),
+          UIBox_button({id = 'saveslots_import', label = {'Import', 'code'}, button = 'saveslots_import',
+            colour = G.C.BLUE, minw = META_BUTTON_W, maxw = META_BUTTON_W - 0.1, minh = 0.66, scale = 0.3, col = true}),
+          UIBox_button({id = 'saveslots_backups', label = {'Backups'}, button = 'saveslots_backups',
+            colour = G.C.ORANGE, minw = META_BUTTON_W, maxw = META_BUTTON_W - 0.1, minh = 0.66, scale = 0.3, col = true}),
         }},
       }},
     },
@@ -988,12 +1152,13 @@ local function release_editor_hook()
   if hook.REMOVED or (box and hook.UIBox == box) then G.CONTROLLER.text_input_hook = nil end
 end
 
--- Leaves edit mode (without saving) and closes the import panel. Returns true
--- when either was open.
+-- Leaves edit mode (without saving) and closes the import and backups panels.
+-- Returns true when any of them was open.
 local function close_editor()
-  local was_import = state.import ~= nil
+  local was_panel = state.import ~= nil or state.backups ~= nil
   state.import = nil
-  if not state.editing then return was_import end
+  state.backups = nil
+  if not state.editing then return was_panel end
   release_editor_hook()
   state.editing = nil
   state.edit_text = ''
@@ -1232,6 +1397,7 @@ function ui.install()
     state.confirm_delete = nil
     release_editor_hook()
     state.import = nil
+    state.backups = nil
     state.editing = field
     state.edit_text = type(slot.meta) == 'table' and type(slot.meta[field]) == 'string' and slot.meta[field] or ''
     local slots = list_slots()
@@ -1352,6 +1518,128 @@ function ui.install()
     if G.OVERLAY_MENU then G.FUNCS.exit_overlay_menu() end
     unseed = t.seed
     G.FUNCS.start_run(nil, {seed = t.seed, stake = t.stake})
+  end
+
+  -- Profile backups (0.4, T-374) -------------------------------------------------
+
+  -- The panel lives in the detail box, its buttons in the action row.
+  local function refresh_backups()
+    local slots = list_slots()
+    refresh_detail(slots)
+    refresh_actions(slots)
+  end
+
+  -- A panel message: on its message line and as an alert.
+  local function backups_say(bk, text, cancel)
+    bk.msg = text
+    if G.OVERLAY_MENU and state.backups == bk then
+      refresh_backups()
+      alert(text)
+    end
+    if cancel then play_sound('cancel') end
+  end
+
+  G.FUNCS.saveslots_backups = function(e)
+    if not G.OVERLAY_MENU then return end
+    state.confirm_delete = nil
+    close_editor()
+    state.backups = {page = 1}
+    local slots = list_slots()
+    refresh_detail(slots)
+    refresh_actions(slots)
+    refresh_meta(slots)
+  end
+
+  G.FUNCS.saveslots_backups_close = function(e)
+    close_editor()
+    open(false)
+  end
+
+  G.FUNCS.saveslots_backup_select = function(e)
+    local bk = state.backups
+    local id = e and e.config and e.config.ref_table and e.config.ref_table.id
+    if not (bk and id and G.OVERLAY_MENU) then return end
+    bk.selected, bk.confirm_restore, bk.confirm_delete, bk.msg = id, nil, nil, nil
+    refresh_backups()
+  end
+
+  G.FUNCS.saveslots_backups_page_cycle = function(e) return G.FUNCS.option_cycle(e) end
+  G.FUNCS.saveslots_backups_page = function(args)
+    local bk = state.backups
+    if not (bk and args and args.cycle_config) then return end
+    bk.page = args.cycle_config.current_option
+    bk.confirm_restore, bk.confirm_delete = nil, nil
+    refresh_backups()
+  end
+
+  -- Waits for the game's pending profile save (backup.when_settled), so the copy has
+  -- what the game still held in memory; usually a frame or two.
+  G.FUNCS.saveslots_backup_now = function(e)
+    local bk = state.backups
+    if not (bk and G.OVERLAY_MENU) or bk.busy then return end
+    bk.confirm_restore, bk.confirm_delete, bk.busy = nil, nil, true
+    bk.msg = 'Backing up'
+    refresh_backups()
+    backup.when_settled(function()
+      bk.busy = nil
+      local id, err = backup.take('manual')
+      if id then bk.selected, bk.page = id, 1 end
+      backups_say(bk, id and 'Backed up' or err == backup.NOTHING and 'Nothing to back up yet'
+        or 'Backup failed: '..tostring(err), not id)
+    end)
+  end
+
+  -- After the reload the overlay is gone (vanilla's profile switch removes it with
+  -- the old main menu): it is built again with the panel open.
+  local function restored(ok, err)
+    local bk = state.backups or {page = 1}
+    state.backups = bk
+    bk.selected, bk.confirm_restore, bk.confirm_delete, bk.busy = nil, nil, nil, nil
+    if ok then
+      bk.page = 1
+      state.confirm_delete = nil
+      open(false)
+    end
+    backups_say(bk, ok and 'Profile restored' or 'Restore failed: '..tostring(err), not ok)
+  end
+
+  G.FUNCS.saveslots_backup_restore = function(e)
+    local bk = state.backups
+    if not (bk and selected_backup() and G.OVERLAY_MENU) then return end
+    bk.confirm_delete = nil
+    local can, why = backup.can_restore()
+    if not can then
+      bk.confirm_restore = nil
+      return backups_say(bk, (tostring(why):gsub('^%l', string.upper)), true)
+    end
+    if bk.confirm_restore ~= bk.selected then
+      bk.confirm_restore = bk.selected
+      bk.msg = 'Press again to restore. Your current progress is backed up first.'
+      return refresh_backups()
+    end
+    -- Busy before the call: a failure can come back through `restored` at once.
+    bk.confirm_restore, bk.busy, bk.msg = nil, true, 'Restoring'
+    local ok, err = backup.restore(bk.selected, restored)
+    if not ok then
+      bk.busy = nil
+      return backups_say(bk, 'Restore failed: '..tostring(err), true)
+    end
+    if bk.busy then refresh_backups() end
+  end
+
+  G.FUNCS.saveslots_backup_delete = function(e)
+    local bk = state.backups
+    local b = selected_backup()
+    if not (b and G.OVERLAY_MENU) then return end
+    bk.confirm_restore = nil
+    if bk.confirm_delete ~= b.id then
+      bk.confirm_delete = b.id
+      return refresh_actions(list_slots())
+    end
+    bk.confirm_delete = nil
+    local ok, err = backup.delete(b.id)
+    if ok then bk.selected = nil end
+    backups_say(bk, ok and 'Backup deleted' or 'Delete failed: '..tostring(err), not ok)
   end
 
   local orig_start_run = Game.start_run

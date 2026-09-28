@@ -23,6 +23,10 @@ Module names are `bhcore.*` (see `mods/bh-core/lovely.toml`). `BHCore` is the gl
 | `ante_change` | the ante changes | `{from, to}` |
 | `run_end` | game over or win | `{won = bool, ante, round, seed}` |
 
+## Text inputs (0.3.4)
+
+`BHCore.install_digits()` is idempotent; a mod UI calls it from its install. Afterwards an input made with `create_text_input{bh_digits = true, ...}` keeps a typed `'0'` (vanilla's `text_input_key` types `'o'` for it in every input, because seeds have no zero). Inputs without the flag, and a `'0'` typed with caps (`'O'`), behave as in vanilla. It works with vanilla's child ids and with the `<id>_position` ids of Steamodded and HandyBalatro (journal/2026-09-28-text-inputs.md). Scenario: `text_digits`, also in `make lovely-check` under Steamodded and under Handy.
+
 ## sim.state
 
 `require('bhcore.sim.state')`. A **sim state** `S` is a plain table:

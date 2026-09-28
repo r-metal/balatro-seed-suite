@@ -9,15 +9,29 @@
 --   without it load as they are, and entries without it are the player's own slots.
 --   meta (0.2, docs/contracts-0.2.md § SaveSlots 0.2) is additive the same way:
 --   {kind = 'save'|'checkpoint'|'practice'|'hunt', target?, notes?, run_id?, origin?,
---   favorite?, ...}. favorite = true pins the slot in the overlay; false clears it. An entry without it (every 0.1.0 index) is kind 'save'. The index version
+--   favorite?, folder?, ...}. favorite = true pins the slot in the overlay; false clears it. An entry without it (every 0.1.0 index) is kind 'save'. The index version
 --   stays 1, so a 0.1.0 build reads a 0.2 index as it is and ignores meta.
+--   folder (0.3.4) is the player's own grouping: a string, trimmed and capped at
+--   FOLDER_MAX; '' clears it, as with target and notes. It is local organisation: share
+--   codes never carry it. A 0.3.3 build reads an index with folders unchanged.
 --
 -- API (every function returns nil, err on failure, leaving what list/read return as it
 -- was; none of them raise):
 --   store.list(filter?)           -> {{id, name, saved_at, summary, meta}, ...}, newest
 --                                    first. meta is a copy, kind always set. filter =
 --                                    {kind = k} keeps only the entries of that kind;
---                                    {favorite = true} only the favorites (both combine).
+--                                    {favorite = true} only the favorites;
+--                                    {folder = '<name>'} only that folder (matched
+--                                    case-sensitively after trimming); {folder = false}
+--                                    (or a blank folder string) only the slots with no
+--                                    folder; {query = '<text>'} only the entries whose
+--                                    name, summary.seed, summary.deck, meta.notes,
+--                                    meta.target or meta.folder contains the text: a
+--                                    case-insensitive plain substring (never a Lua
+--                                    pattern), trimmed; a blank query filters nothing.
+--                                    Every field given combines with the others (AND).
+--   store.folders()               -> {'<folder>', ...}: the distinct folders of the
+--                                    listed slots, sorted case-insensitively.
 --   store.read(id)                -> run table (the savetext for G:start_run) | nil, err
 --   store.save(run, name, id?, meta?)
 --                                 -> id. No id: new slot. With id: overwrite run, summary
@@ -27,8 +41,10 @@
 --                                    nothing is written).
 --   store.set_meta(id, meta)      -> true | nil, err. Merges meta's fields into the
 --                                    entry's; every other field (and the rest of the
---                                    entry) is kept. target and notes are trimmed and
---                                    capped (TARGET_MAX, NOTES_MAX); '' clears one.
+--                                    entry) is kept. target, notes and folder are
+--                                    trimmed and capped (TARGET_MAX, NOTES_MAX,
+--                                    FOLDER_MAX); '' clears one. A non-string one is
+--                                    refused (nil, err; nothing written).
 --   store.prune_checkpoints(per_run, runs)
 --                                 -> number deleted | nil/number, err. Auto-checkpoints
 --                                    (T-121): among kind 'checkpoint' entries with a
@@ -36,7 +52,9 @@
 --                                    and only the `runs` run_ids whose newest checkpoint
 --                                    is newest; deletes the rest. Nothing else is ever
 --                                    touched (player saves, practice, hunts, checkpoints
---                                    without a run_id, favorites). A failed delete is skipped and
+--                                    without a run_id, favorites, checkpoints filed in a
+--                                    folder: filing one is an explicit keep, as pinning
+--                                    it is). A failed delete is skipped and
 --                                    reported in err next to the count.
 --   store.rename(id, name)        -> true | nil, err
 --   store.delete(id)              -> true | nil, err
@@ -54,9 +72,11 @@ local store = {}
 local INDEX_VERSION = 1
 local NAME_MAX = 24
 local BRAINSTORM_SLOTS = 5
-local TARGET_MAX, NOTES_MAX = 24, 60
+local TARGET_MAX, NOTES_MAX, FOLDER_MAX = 24, 60, 16
 store.KINDS = {'save', 'checkpoint', 'practice', 'hunt'}
-store.TARGET_MAX, store.NOTES_MAX = TARGET_MAX, NOTES_MAX
+store.TARGET_MAX, store.NOTES_MAX, store.FOLDER_MAX = TARGET_MAX, NOTES_MAX, FOLDER_MAX
+-- The meta text fields: trimmed, capped at their max, and cleared by ''.
+local TEXT_FIELDS = {target = TARGET_MAX, notes = NOTES_MAX, folder = FOLDER_MAX}
 local KIND_SET = {}
 for _, k in ipairs(store.KINDS) do KIND_SET[k] = true end
 
@@ -203,14 +223,14 @@ end
 -- Trimmed text capped at `max` chars; '' when nothing is left (the caller clears it).
 local function clean_text(s, max) return trim(trim(s):sub(1, max)) end
 
--- Checks and copies a meta table given to save/set_meta. Returns the copy, with target
--- and notes cleaned ('' meaning "clear this one"), or nil, err.
+-- Checks and copies a meta table given to save/set_meta. Returns the copy, with target,
+-- notes and folder cleaned ('' meaning "clear this one"), or nil, err.
 local function clean_meta(meta)
   if type(meta) ~= 'table' then return nil, 'meta must be a table' end
   local m, err = copy_value(meta, 1)
   if not m then return nil, 'bad meta: '..tostring(err) end
   if m.kind ~= nil and not KIND_SET[m.kind] then return nil, 'bad kind '..tostring(m.kind) end
-  for field, max in pairs({target = TARGET_MAX, notes = NOTES_MAX}) do
+  for field, max in pairs(TEXT_FIELDS) do
     if m[field] ~= nil then
       if type(m[field]) ~= 'string' then return nil, field..' must be a string' end
       m[field] = clean_text(m[field], max)
@@ -223,12 +243,12 @@ local function clean_meta(meta)
 end
 
 -- `base` (an entry's meta, possibly nil or junk from disk) with `m`'s fields merged in.
--- A cleared target/notes and favorite = false are dropped. Returns nil when nothing is left, so an entry that
+-- A cleared target/notes/folder and favorite = false are dropped. Returns nil when nothing is left, so an entry that
 -- never had meta keeps the 0.1.0 shape.
 local function merge_meta(base, m)
   local out = type(base) == 'table' and (copy_value(base, 1) or {}) or {}
   for k, v in pairs(m or {}) do
-    if ((k == 'target' or k == 'notes') and v == '') or (k == 'favorite' and v == false) then out[k] = nil
+    if (TEXT_FIELDS[k] and v == '') or (k == 'favorite' and v == false) then out[k] = nil
     else out[k] = v end
   end
   return next(out) and out or nil
@@ -239,6 +259,42 @@ local function public_meta(e)
   local m = type(e.meta) == 'table' and copy_value(e.meta, 1) or {}
   if type(m.kind) ~= 'string' then m.kind = 'save' end
   return m
+end
+
+-- A listed entry's folder, or nil when it has none (junk from disk counts as none).
+local function folder_of(meta)
+  local f = type(meta.folder) == 'string' and trim(meta.folder) or ''
+  return f ~= '' and f or nil
+end
+
+-- list()'s folder field: nil (no folder filter), false (only unfiled slots) or a name.
+-- A blank name is "no folder", as '' is in meta; any other type filters nothing.
+local function folder_filter(filter)
+  if type(filter) ~= 'table' then return nil end
+  local f = filter.folder
+  if f == false then return false end
+  if type(f) ~= 'string' then return nil end
+  f = trim(f)
+  if f == '' then return false end
+  return f
+end
+
+-- list()'s query, lowercased, or nil when blank or not a string.
+local function query_filter(filter)
+  local q = type(filter) == 'table' and filter.query
+  if type(q) ~= 'string' then return nil end
+  q = trim(q)
+  return q ~= '' and q:lower() or nil
+end
+
+-- True when `q` (lowercased) is a plain substring of one of the searched fields.
+local function matches_query(q, name, summary, meta)
+  local fields = {name, summary.seed, summary.deck, meta.notes, meta.target, meta.folder}
+  for i = 1, 6 do   -- (any of them may be nil: not ipairs)
+    local v = fields[i]
+    if type(v) == 'string' and v:lower():find(q, 1, true) then return true end
+  end
+  return false
 end
 
 local function brainstorm_path(k) return tostring(G.SETTINGS.profile)..'/saveState'..k..'.jkr' end
@@ -389,11 +445,15 @@ function store.list(filter)
   local idx = read_index()
   local kind = type(filter) == 'table' and filter.kind or nil
   local fav_only = type(filter) == 'table' and filter.favorite == true
+  local folder, query = folder_filter(filter), query_filter(filter)
   local out, pruned = {}, false
   for id, e in pairs(idx.slots) do
     if valid_id(id) and type(e) == 'table' and slot_exists(id) then
       local meta = public_meta(e)
-      if (kind == nil or meta.kind == kind) and (not fav_only or meta.favorite == true) then
+      local summary = type(e.summary) == 'table' and e.summary or {}
+      if (kind == nil or meta.kind == kind) and (not fav_only or meta.favorite == true)
+          and (folder == nil or folder_of(meta) == (folder or nil))
+          and (query == nil or matches_query(query, e.name, summary, meta)) then
         out[#out+1] = {id = id, name = e.name, saved_at = e.saved_at or 0, summary = e.summary or {},
           meta = meta}
       end
@@ -409,6 +469,20 @@ function store.list(filter)
     local bb, bs = id_key(b.id)
     if ab ~= bb then return ab > bb end
     return as > bs
+  end)
+  return out
+end
+
+function store.folders()
+  local seen, out = {}, {}
+  for _, e in ipairs(store.list()) do
+    local f = folder_of(e.meta)
+    if f and not seen[f] then seen[f] = true; out[#out+1] = f end
+  end
+  table.sort(out, function(a, b)
+    local la, lb = a:lower(), b:lower()
+    if la ~= lb then return la < lb end
+    return a < b
   end)
   return out
 end
@@ -495,7 +569,7 @@ function store.prune_checkpoints(per_run, runs)
   -- list() is newest first, so a run_id is ranked by its newest checkpoint.
   for _, e in ipairs(store.list({kind = 'checkpoint'})) do
     local rid = e.meta.run_id
-    if type(rid) == 'string' and e.meta.favorite ~= true then
+    if type(rid) == 'string' and e.meta.favorite ~= true and not folder_of(e.meta) then
       if rank[rid] == nil then
         nruns = nruns + 1
         rank[rid], kept[rid] = nruns, 0

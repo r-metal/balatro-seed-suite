@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4 — 2026-09-28
+
+Organise your filters and saves.
+
+- **Seed Finder: name your filters.** **Rename** sets a name that sticks when you change the clauses; clear the name to get the generated one back. **Save as** makes a copy of the current filter to tweak, leaving the original as it was. Hunts and the Run Journal show the name you gave.
+- **Save Slots: folders.** Give a save a folder from its details (type a new one or pick one you use). The folder cycle next to the kind cycle lists one folder at a time, or the saves in no folder. Auto-checkpoint pruning keeps a checkpoint you filed.
+- **Save Slots: search.** A search box matches a save's name, seed, deck, notes, target or folder as you type.
+- **Fix: typing `0` in the suite's text boxes gave `o`.** The game's text box is built for seeds, which have no zero. Save names, notes, folders, search and filter names now keep the digit.
+- Save Slots: "Save current run" is now a **Save** button beside the name box, which makes room for the folder cycle and the search box.
+- Under the hood: `make lovely-check` types into the new boxes under Steamodded and next to HandyBalatro, which both change how the game's text boxes are built.
+
 ## 0.3.3 — 2026-09-28
 
 Two fixes for games with Steamodded.

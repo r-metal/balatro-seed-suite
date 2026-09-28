@@ -51,16 +51,20 @@ smoke-dist: dist game-src
 # The real game with the real lovely (its Linux build) in a throwaway Mods dir, with the
 # release zip and, for compatibility, Steamodded (a copy in tools/smods-*/) and other
 # mods (rig/lovely-rig.sh). lovely-check is the compatibility matrix; the content-mod
-# case runs when tools/pokermon/ holds a copy of Pokermon.
+# case runs when tools/pokermon/ holds a copy of Pokermon, and the text-input case
+# (HandyBalatro renames the input's child ids, as Steamodded does) when tools/HandyBalatro/ does.
 lovely-smoke: dist game-src
 	@rig/lovely-rig.sh $(S) $(if $(SMODS),--smods)
 
 LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods \
-  lovely_paused_sim:--smods lovely_preview_smods:--smods golden_stable:--smods golden_walk:--smods golden_tagpacks:--smods
+  lovely_paused_sim:--smods lovely_preview_smods:--smods golden_stable:--smods golden_walk:--smods golden_tagpacks:--smods \
+  text_digits:--smods finder_names:--smods saveslots_folders:--smods
 lovely-check: dist game-src
 	@export SMOKE_TIMEOUT=$${SMOKE_TIMEOUT:-600}; fail=0; for e in $(LOVELY_MATRIX); do rig/lovely-rig.sh $${e%%:*} $${e#*:} || fail=1; done; \
 	  if [ -d tools/pokermon ]; then rig/lovely-rig.sh lovely_content_mod --smods --mod tools/pokermon || fail=1; \
-	  else echo "lovely-check: no tools/pokermon, content-mod case skipped"; fi; exit $$fail
+	  else echo "lovely-check: no tools/pokermon, content-mod case skipped"; fi; \
+	  if [ -d tools/HandyBalatro ]; then rig/lovely-rig.sh text_digits --mod tools/HandyBalatro || fail=1; \
+	  else echo "lovely-check: no tools/HandyBalatro, its text-input case skipped"; fi; exit $$fail
 
 # Every layout the suite can be installed in: the dev copies (one folder per mod) and
 # the release bundle (folder or zip). Each install target clears all of them first,

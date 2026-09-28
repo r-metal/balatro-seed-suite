@@ -14,13 +14,19 @@ consumables, vouchers).
 
 ## Using it
 
-- **In a run:** pause (Esc) → **Save Slots**. Type a name, **Save current run**.
+- **In a run:** pause (Esc) → **Save Slots**. Type a name, then **Save**.
   The save is the game's last autosave point (blind select, shop, after a hand),
   the same point Continue would resume from, not the exact frame you pressed it.
 - **From the main menu:** **Play → Saves** tab (3 most recent + "Open Save
   Slots"), or **Options → Save Slots**.
 - In the list: pick a save to preview it, then **Load**, **Overwrite** (in a
   run only), **Rename** (uses the name box), or **Delete** (press twice).
+- **Folders:** give a save a folder from its details column (**Edit** next to Folder):
+  type a new name or pick one you already use. The folder cycle next to the kind
+  cycle lists one folder at a time, or the saves in no folder (**Unfiled**).
+  Auto-checkpoint pruning never deletes a checkpoint you filed.
+- **Search:** the box under the name matches a save's name, seed, deck, notes,
+  target or folder as you type.
 - Loading a save also makes it the main-menu **Continue** run.
 - Brainstorm's `z/x + 1-5` slots are imported once as "Brainstorm slot N".
   The originals are left in place.

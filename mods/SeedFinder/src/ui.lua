@@ -19,8 +19,8 @@
 --
 -- Overlay (create_UIBox_generic_options; Back returns to where it was opened from:
 -- Options, the pause menu or the Play screen)
---   Filter panel   the saved filters (a cycle, New, Delete); deck, stake, match
---                  (all/any clauses) and "All unlocked". Deck and stake follow
+--   Filter panel   the saved filters (a cycle, New, Delete, Rename, Save as); deck,
+--                  stake, match (all/any clauses) and "All unlocked". Deck and stake follow
 --                  vanilla's run-setup rule: only unlocked decks, stakes up to one
 --                  above the deck's best win (all of them on an all-unlocked
 --                  profile). Then the clause list (at most MAX_CLAUSES rows: kind,
@@ -29,7 +29,30 @@
 --                  the blind for a tag (Any/Small/Big),
 --                  the rerolls for a shop joker, the Soul's index for a legendary;
 --                  soul_in_pack's key cycle picks the pack and the source. A
---                  filter's name is generated from its clauses.
+--                  filter's name is generated from its clauses ("Charm Tag + Soul
+--                  in Arcana", cut at NAME_MAX) until the player types one: then
+--                  `named` is true (an additive field, kept in filters.jkr; sane()
+--                  keeps it only as a boolean) and clause edits leave the name
+--                  alone. A typed name is trimmed and capped at NAME_MAX (30); an
+--                  empty or blank one clears `named`, and the generated name comes
+--                  back at once. Hits, Save as hunt (origin.filter_name, and the
+--                  filter in the share code) and RunJournal's per-filter stats all
+--                  read f.name, so they carry a typed name unchanged.
+--   Name editor    Rename opens it in the deck/stake/mode row's place (same
+--                  height): "Name", a text input (bh_digits, so a typed '0' stays
+--                  '0': BHCore.install_digits; extended corpus; NAME_MAX letters)
+--                  prefilled with a typed name, or empty with the generated name as
+--                  its prompt; then Save and Cancel. It is hooked when it opens, so
+--                  typing goes straight in; Return in it saves, as Save does.
+--                  Cancel keeps the old name (nothing is written until a save).
+--                  Save as puts a deep copy of the current filter (no table shared,
+--                  `named` copied) right after it, makes the copy current and opens
+--                  the editor on it; cancelling that keeps the copy. The editor
+--                  closes, and its text-input hook is released at once, whenever
+--                  its box goes away: the filter cycle, New, Delete, Save as,
+--                  ui.set_filter, Start, Play, and leaving or reopening the overlay
+--                  (no key press lands on a removed input). A clause edit rebuilds
+--                  the panel with the editor still open and hooked.
 --   Search panel   workers (1..8), Start / Cancel, live Scanned / Rate / Hits / Per M
 --                  (verified plus pending hits per million scanned, engine.poll's
 --                  hits_per_million, while a search runs) and a status line; Odds
@@ -53,11 +76,15 @@
 --                  whole filter once more. A clause that never passed says so
 --                  instead, over both lines: "clause k never passed in 20,000
 --                  seeds: | it may be impossible or locked (<label>)". The lines clear (and a running sample is cancelled) as
---                  soon as the filter differs from the one sampled.
+--                  soon as the filter differs from the one sampled, its name aside
+--                  (a rename keeps them).
 --   Width          the overlay keeps one width whatever it shows (T-316): the clause
 --                  rows and hit rows fit inside their panels' minw, and the status and
 --                  odds lines are held by maxw. A row wider than its panel's minw
---                  would widen the whole overlay the moment it appeared.
+--                  would widen the whole overlay the moment it appeared. The filter
+--                  row (cycle + four buttons) and the name editor's row fit FILTER_W
+--                  too: a long name is shrunk to the filter cycle's width, and the
+--                  editor's input is wide enough for NAME_MAX of the widest letter.
 --   Every edit is written to <profile>/seedfinder/filters.jkr (bhcore.fs) at once.
 --
 -- Play (a hit)       refuses (status line + the cancel sound) a filter whose deck or
@@ -119,14 +146,18 @@
 --                          panel shows (one sentence may run over both); sample is the engine handle, kept after the
 --                          job ends (engine.alive(sample) says whether it exited).
 --   ui.set_filter(f)      replaces the filter being edited with a copy of f (as a
---                          filter from disk is taken: sane), renamed, saved and
---                          redrawn. true | nil, err.
+--                          filter from disk is taken: sane), renamed (unless f.named),
+--                          saved and redrawn; an open name editor closes. true | nil, err.
 --   ui.round_count(n), ui.round_time(secs) the Odds line's rounding, as text.
 -- Buttons (G.FUNCS names, for ctx.click; ids in brackets)
 --   seedfinder_open (Options/pause/Find tab), seedfinder_cycle (every cycle arrow:
 --   [seedfinder_<cycle>_l|_r], cycles: filter, deck, stake, mode, workers, c<i>_kind,
 --   c<i>_ante, c<i>_extra, c<i>_key, hits_page), seedfinder_add, seedfinder_remove
---   [seedfinder_remove_<i>], seedfinder_new, seedfinder_delete, seedfinder_start,
+--   [seedfinder_remove_<i>], seedfinder_new, seedfinder_delete, seedfinder_rename
+--   [seedfinder_rename], seedfinder_save_as [seedfinder_save_as], in the name editor
+--   seedfinder_name_save [seedfinder_name_save] and seedfinder_name_cancel
+--   [seedfinder_name_cancel] (its input: the only 'text_input' in the Filter panel;
+--   Return calls seedfinder_name_return), seedfinder_start,
 --   seedfinder_cancel, seedfinder_odds, seedfinder_play [seedfinder_play_<i>, seedfinder_tabplay_<i>],
 --   seedfinder_hunt [seedfinder_hunt_<i>], seedfinder_route [seedfinder_route_<i>,
 --   seedfinder_tabroute_<i>]; in the Route panel seedfinder_play
@@ -154,6 +185,7 @@ local FILTER_W, SEARCH_W = 11.6, 6.2
 local ODDS_SAMPLE = 20000 -- seeds per Odds press
 local HALF_W = 2.45       -- the Customize Deck / Seed Finder pair: 2 x 2.45 + 0.1 = vanilla's 5
 local TAB_W, TAB_H = 6.4, 5.2
+local ROW2_H = 0.82       -- the deck/stake/mode row, and the name editor in its place
 local ROUTE_W = 11        -- the Route panel; its step lines wrap at ROUTE_W - 1
 
 local installed = false
@@ -169,6 +201,7 @@ local workers = nil
 local page = 1            -- the results list's page
 local shown = nil         -- see ui.route()
 local odds_job = nil      -- see ui.odds(); plus handle, the engine handle while it runs
+local editor = nil        -- the name editor while open: {filter, text}; text is its input's ref_value
 -- Live text (UIT.T ref_table/ref_value).
 local live = {scanned = '0', rate = '-', hits = '0', hpm = '-', status = ''}
 
@@ -393,8 +426,16 @@ local function copy(v)
   return out
 end
 
--- A filter's name comes from its clauses.
+-- A name as the player typed it: trimmed and capped at NAME_MAX ('' for a blank one).
+local function clean_name(s)
+  s = tostring(s or ''):match('^%s*(.-)%s*$')
+  if #s > NAME_MAX then s = s:sub(1, NAME_MAX):match('^(.-)%s*$') end
+  return s
+end
+
+-- A filter's name comes from its clauses, unless the player typed one (named).
 local function rename(f)
+  if f.named then return end
   local parts = {}
   for _, c in ipairs(f.clauses) do parts[#parts + 1] = describe(c) end
   local s = #parts > 0 and table.concat(parts, ' + ') or 'Empty filter'
@@ -414,6 +455,7 @@ local function sane(f)
   for _, k in ipairs{'name', 'stake', 'deck', 'all_unlocked', 'mode'} do
     if f[k] ~= nil then g[k] = f[k] end
   end
+  if type(f.named) == 'boolean' then g.named = f.named end
   for i, c in ipairs(f.clauses) do
     if i > MAX_CLAUSES then break end
     g.clauses[#g.clauses + 1] = copy(c)
@@ -421,6 +463,11 @@ local function sane(f)
   local probe = copy(g)
   if #probe.clauses == 0 then probe.clauses = {default_clause('tag')} end
   if not filter.validate(probe) then return nil end
+  -- A typed name held as typed (validate made it a string); a blank one is no name.
+  if g.named then
+    g.name = clean_name(g.name)
+    if g.name == '' then g.named = nil; rename(g) end
+  end
   return g
 end
 
@@ -453,9 +500,53 @@ function M.current()
   return s.filters[s.current]
 end
 
+-- The name editor ------------------------------------------------------------------
+
+-- Drops the text-input hook when it is the name editor's input (or a removed one),
+-- so no key press lands on a box that is going away (saveslots/ui.lua's
+-- release_editor_hook).
+local function release_editor_hook()
+  local hook = G.CONTROLLER and G.CONTROLLER.text_input_hook
+  if not hook then return end
+  local args = hook.config and hook.config.ref_table
+  if hook.REMOVED or (editor and type(args) == 'table' and args.ref_table == editor) then
+    G.CONTROLLER.text_input_hook = nil
+  end
+end
+
+-- Closes the name editor without saving (the name was never touched: Cancel keeps
+-- it); the panel redraws without the editor.
+local function close_editor()
+  if not editor then return end
+  release_editor_hook()
+  editor = nil
+  dirty.filter = true
+end
+
+-- Opens the editor on the current filter: prefilled with its name when the player
+-- typed it, empty (the generated name as the prompt) otherwise. The panel redraws
+-- with it on the next tick, which hooks its input.
+local function open_editor()
+  close_editor()
+  local f = M.current()
+  editor = {filter = f, text = f.named and f.name or ''}
+  dirty.filter = true
+end
+
+-- Hooks the editor's input (the only text input in the filter panel), so typing
+-- goes straight in. Called after each rebuild of the panel while the editor is open.
+local function hook_editor()
+  if not editor then return end
+  local node = G.OVERLAY_MENU and G.OVERLAY_MENU ~= true and G.OVERLAY_MENU:get_UIE_by_ID('seedfinder_filter')
+  local box = node and node.config.object
+  local input = box and box.get_UIE_by_ID and box:get_UIE_by_ID('text_input')
+  if input then G.FUNCS.select_text_input(input) end
+end
+
 function M.set_filter(f)
   local g = sane(f)
   if not g then return nil, 'not a filter' end
+  close_editor()
   local s = load_filters()
   s.filters[s.current] = g
   rename(g)
@@ -470,6 +561,18 @@ local function changed(redraw)
   rename(f)
   M.save_filters()
   dirty.filter = dirty.filter or redraw
+end
+
+-- Save, or Return in the name editor: a typed name sticks (named = true); an empty
+-- or blank one clears named, and the generated name comes back at once.
+local function commit_name()
+  local ed = editor
+  if not ed then return end
+  close_editor()
+  if M.current() ~= ed.filter then return end
+  local t = clean_name(ed.text)
+  if t == '' then ed.filter.named = nil else ed.filter.name, ed.filter.named = t, true end
+  changed(true)
 end
 
 -- The ticker ------------------------------------------------------------------------
@@ -630,11 +733,24 @@ local function same(a, b)
   return true
 end
 
+-- Whether two filters search for the same seeds: the same data, their names aside
+-- (a rename changes no hit, so it keeps the Odds lines).
+local function same_search(a, b)
+  if type(a) ~= 'table' or type(b) ~= 'table' then return a == b end
+  for k, v in pairs(a) do
+    if k ~= 'name' and k ~= 'named' and not same(v, b[k]) then return false end
+  end
+  for k in pairs(b) do
+    if k ~= 'name' and k ~= 'named' and a[k] == nil then return false end
+  end
+  return true
+end
+
 -- The seeds/s the Odds line reads time at: the last search's, when it searched
 -- this very filter, else the sample's own rate times (clauses + 1) (a sample
 -- evaluates each clause alone and the whole filter once more per seed).
 local function odds_rate(job, p)
-  if search and (search.rate or 0) > 0 and same(search.filter, job.filter) then return search.rate end
+  if search and (search.rate or 0) > 0 and same_search(search.filter, job.filter) then return search.rate end
   return (p.rate or 0) * (#job.filter.clauses + 1)
 end
 
@@ -726,10 +842,16 @@ tick = function()
   poll()
   poll_hunt()
   poll_odds()
-  -- The Odds lines belong to the filter sampled: any edit clears them.
-  if odds_job and not same(M.current(), odds_job.filter) then clear_odds() end
+  -- The Odds lines belong to the filter sampled: any edit but a rename clears them.
+  if odds_job and not same_search(M.current(), odds_job.filter) then clear_odds() end
+  -- Leaving the overlay (Back, Play, a Route panel) takes the name editor with it.
+  if editor and not M.is_open() then close_editor() end
   if M.is_open() then
-    if dirty.filter then dirty.filter = false; replace('seedfinder_filter', filter_panel_def) end
+    if dirty.filter then
+      dirty.filter = false
+      replace('seedfinder_filter', filter_panel_def)
+      hook_editor()
+    end
     if dirty.results then dirty.results = false; replace('seedfinder_results', results_def) end
     if dirty.odds then dirty.odds = false; replace('seedfinder_odds', odds_def) end
   end
@@ -912,6 +1034,28 @@ local function clause_row(i, c)
   }, {padding = 0.02})
 end
 
+-- The name editor's row, in the deck/stake/mode row's place and height: a text
+-- input (digits kept, BHCore.install_digits), Save and Cancel. Return saves too. The
+-- input's w holds NAME_MAX of the game font's widest typeable letter at NAME_SCALE
+-- ('&': finder_names types 30 of it), so no name grows the row past the panel.
+local NAME_W, NAME_SCALE = 7.2, 0.36
+local function editor_row(f)
+  local generated = copy(f)
+  generated.named = nil
+  rename(generated)
+  return row({
+    text('Name', 0.36),
+    gap(0.12),
+    create_text_input{w = NAME_W, max_length = NAME_MAX, extended_corpus = true, bh_digits = true,
+      text_scale = NAME_SCALE, ref_table = editor, ref_value = 'text', prompt_text = generated.name,
+      callback = function() G.FUNCS.seedfinder_name_return() end},
+    gap(0.12),
+    button('Save', 'seedfinder_name_save', {id = 'seedfinder_name_save', w = 1.2, h = 0.5, colour = G.C.GREEN}),
+    gap(0.06),
+    button('Cancel', 'seedfinder_name_cancel', {id = 'seedfinder_name_cancel', w = 1.2, h = 0.5}),
+  }, {padding = 0.02, minh = ROW2_H})
+end
+
 filter_panel_def = function()
   local s = load_filters()
   local f = M.current()
@@ -920,15 +1064,22 @@ filter_panel_def = function()
   local deck_l, deck_v = deck_options(f.deck)
   local stake_l, stake_v = stake_options(f.deck, f.stake)
   local rows = {
+    -- The cycle's w leaves room for the four buttons inside FILTER_W; a long name
+    -- is shrunk to the cycle's width (cycle()).
     row({
       cycle('filter', names, idx, s.current, function(v)
+        close_editor()
         s.current = v; M.save_filters(); dirty.filter = true
-      end, {w = 6.2, colour = G.C.BOOSTER}),
-      button('New', 'seedfinder_new', {w = 1.3, colour = G.C.BLUE}),
-      gap(0.1),
-      button('Delete', 'seedfinder_delete', {w = 1.3}),
+      end, {w = 6, colour = G.C.BOOSTER}),
+      button('New', 'seedfinder_new', {w = 1.05, colour = G.C.BLUE, scale = 0.36}),
+      gap(0.06),
+      button('Delete', 'seedfinder_delete', {w = 1.15, scale = 0.36}),
+      gap(0.06),
+      button('Rename', 'seedfinder_rename', {id = 'seedfinder_rename', w = 1.2, colour = G.C.ORANGE, scale = 0.36}),
+      gap(0.06),
+      button('Save as', 'seedfinder_save_as', {id = 'seedfinder_save_as', w = 1.25, colour = G.C.PURPLE, scale = 0.36}),
     }, {padding = 0.04}),
-    row({
+    editor and editor_row(f) or row({
       -- A deck change rebuilds the panel: its stake cycle offers that deck's stakes.
       cycle('deck', deck_l, deck_v, f.deck, function(v)
         f.deck = v
@@ -938,7 +1089,7 @@ filter_panel_def = function()
       cycle('stake', stake_l, stake_v, f.stake, function(v) f.stake = v; changed() end, {w = 2.9}),
       cycle('mode', {'All clauses', 'Any clause'}, {'all', 'any'}, f.mode or 'all',
         function(v) f.mode = v; changed() end, {w = 2.4}),
-    }, {padding = 0.02}),
+    }, {padding = 0.02, minh = ROW2_H}),
     row({
       create_toggle{col = true, label = 'All unlocked', ref_table = f, ref_value = 'all_unlocked', w = 2, scale = 0.8,
         label_scale = 0.35, callback = function() changed() end},
@@ -1117,6 +1268,7 @@ end
 function M.open(where)
   from = where or (G.STAGE == G.STAGES.RUN and 'pause' or 'options')
   load_filters()
+  close_editor()
   dirty = {}
   G.SETTINGS.paused = true
   G.FUNCS.overlay_menu{definition = overlay_def()}
@@ -1131,6 +1283,7 @@ function M.hunt() return hunt end
 
 local function start_search()
   if handle then return end
+  close_editor()
   if blocked() then status(blocked()); return end
   local f = copy(M.current())
   local ok, err = filter.validate(f)
@@ -1187,6 +1340,7 @@ local function play(i, as_hunt)
   end
   status('')
   cancel_search()
+  close_editor()
   if type(RunJournal) == 'table' and RunJournal.recorder and RunJournal.recorder.set_origin then
     pcall(RunJournal.recorder.set_origin, {filter_name = f.name})
   end
@@ -1476,6 +1630,7 @@ end
 function M.install()
   if installed then return end
   installed = true
+  BHCore.install_digits()   -- the name editor keeps a typed '0'
 
   local orig_options = create_UIBox_options
   create_UIBox_options = function(...)
@@ -1560,18 +1715,39 @@ function M.install()
     changed(true)
   end
   G.FUNCS.seedfinder_new = function(e)
+    close_editor()
     local s = load_filters()
     s.filters[#s.filters + 1] = new_filter()
     s.current = #s.filters
     changed(true)
   end
   G.FUNCS.seedfinder_delete = function(e)
+    close_editor()
     local s = load_filters()
     table.remove(s.filters, s.current)
     if #s.filters == 0 then s.filters[1] = new_filter() end
     s.current = math.max(1, math.min(s.current, #s.filters))
     changed(true)
   end
+
+  -- The name editor: Rename opens it on the current filter; Save as puts a deep copy
+  -- (no table shared with the original, named copied) right after the current filter,
+  -- makes it current and opens the editor on it. Cancelling keeps the copy.
+  G.FUNCS.seedfinder_rename = function(e) open_editor() end
+  G.FUNCS.seedfinder_save_as = function(e)
+    close_editor()
+    local s = load_filters()
+    local g = copy(s.filters[s.current])
+    table.insert(s.filters, s.current + 1, g)
+    s.current = s.current + 1
+    changed(true)
+    open_editor()
+  end
+  G.FUNCS.seedfinder_name_save = function(e) commit_name() end
+  G.FUNCS.seedfinder_name_cancel = function(e) close_editor() end
+  -- Return in the input (create_text_input's callback). Vanilla still touches the
+  -- hooked input after this returns; the panel is rebuilt on the next tick.
+  G.FUNCS.seedfinder_name_return = function() commit_name() end
 
   G.FUNCS.seedfinder_start = function(e) start_search() end
   G.FUNCS.seedfinder_cancel = function(e) cancel_search() end

@@ -81,7 +81,8 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 </p>
 
 - **Filters** combine clauses: skip tags, the boss, vouchers, the Soul's legendary, a Soul in a Charm or Ethereal pack,
-  shop jokers by ante N (with a reroll budget), packs, and editions.
+  shop jokers by ante N (with a reroll budget), packs, and editions. Name a filter yourself, and **Save as** keeps a
+  copy to tweak.
 - **Odds** before you search: how rare a hit is, how long the search should take, and which clause is the bottleneck.
 - **Hits are ranked by what they cost to deliver.** **Route** lists the exact plays: which blind to skip, which pack
   to open, which card is the Soul, and when to use it.
@@ -105,6 +106,7 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 </p>
 
 - Named slots with a card-level preview of the jokers, consumables and vouchers each one holds. Favorites stay on top.
+- **Folders** and a **search** box (name, seed, deck, notes).
 - An **auto-checkpoint** every ante, so you can rewind, and practice scenarios you compose yourself.
 - **Share codes:** copy a slot's seed, deck, stake, notes and filter as one string. Import one to play it.
 - Details: [mods/SaveSlots/README.md](mods/SaveSlots/README.md).

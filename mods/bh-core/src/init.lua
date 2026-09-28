@@ -1,7 +1,7 @@
 -- bh-core: shared library for the suite. Contracts: docs/bh-core.md.
 if BHCore then return BHCore end
 
-BHCore = {VERSION = '0.3.3'}
+BHCore = {VERSION = '0.3.4'}
 
 -- True when this bh-core serves a mod built for major.minor `want` ('0.3'). Before 1.0
 -- a minor release may change the contracts, so both parts must match.
@@ -56,6 +56,46 @@ function BHCore.env_notice()
     return 'Steamodded: editions and bosses are unverified'
   end
   return nil
+end
+
+-- Digits in text inputs. Vanilla's text_input_key types 'o' for '0' in every input
+-- (button_callbacks.lua:970: seeds have no zero). An input made with
+-- create_text_input{bh_digits = true, ...} keeps a typed '0': the wrap lets vanilla
+-- type its 'o', puts '0' in that letter, and lets vanilla's own cursor pass
+-- (TRANSPOSE_TEXT_INPUT(0)) rebuild the text from the letters. Other inputs, and a
+-- '0' typed with caps (vanilla's 'O'), are left to vanilla. Idempotent; each mod UI
+-- that needs it calls it from its install.
+function BHCore.install_digits()
+  if BHCore._digits or not (G and G.FUNCS and G.FUNCS.text_input_key) then return end
+  local orig = G.FUNCS.text_input_key
+  BHCore._digits = true
+  G.FUNCS.text_input_key = function(args)
+    local hook = G.CONTROLLER and G.CONTROLLER.text_input_hook
+    local cfg = hook and hook.config and hook.config.ref_table
+    local text = type(cfg) == 'table' and cfg.bh_digits and cfg.text
+    if not (text and type(args) == 'table' and args.key == '0') then return orig(args) end
+    -- The letter goes in at the cursor, which vanilla's TRANSPOSE_TEXT_INPUT(0) places
+    -- after min(the 'position' child's index - 1, the text's length) letters. Not
+    -- text.current_position: vanilla computes it from the text before the rebuild.
+    -- Steamodded (and HandyBalatro, which copies the patch) prefix the child ids with
+    -- the input's id ('text_input_position'), so match the suffix too.
+    local at
+    for i, c in ipairs(hook.children or {}) do
+      local id = c.config and c.config.id
+      if type(id) == 'string' and (id == 'position' or id:sub(-9) == '_position') then
+        at = math.min(i - 1, #(text.ref_table[text.ref_value] or '')) + 1
+        break
+      end
+    end
+    local len = #(text.ref_table[text.ref_value] or '')
+    local ret = orig(args)
+    -- (a full input types nothing, and the 'o' at the cursor is an old one)
+    if at and text.letters[at] == 'o' and #(text.ref_table[text.ref_value] or '') == len + 1 then
+      text.letters[at] = '0'
+      TRANSPOSE_TEXT_INPUT(0)
+    end
+    return ret
+  end
 end
 
 BHCore.events = require('bhcore.events')

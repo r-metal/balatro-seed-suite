@@ -3,28 +3,39 @@
 -- Layout (modelled on vanilla G.UIDEF.challenge_list + challenge_list_page +
 -- G.FUNCS.change_challenge_description)
 --   left    the kind filter cycle (0.2: All / Saves / Checkpoints / Practice /
---           Hunts / Favorites), name input, "Save current run" (runs only), the
---           paged slot list (PAGE_SIZE rows, favorites first then newest first,
---           coloured by kind, a gold dot on favorites) and the page cycle
+--           Hunts / Favorites) and beside it the folder cycle (0.3.4: All folders /
+--           each folder in use / Unfiled; the two AND together), the name input
+--           with "Save" beside it (runs only), the search input (0.3.4), the paged
+--           slot list (PAGE_SIZE rows, favorites first then newest first, coloured
+--           by kind, a gold dot on favorites) and the page cycle
 --   right   preview.build(run, summary) for the selected slot, action buttons
---           below it: Load, Overwrite (runs only), Rename, Delete. While a target
---           or notes edit is open, the preview is replaced by the editor (same
---           outer size) and the buttons by Save / Cancel.
+--           below it: Load, Overwrite (runs only), Rename, Delete. While a target,
+--           notes or folder edit is open, the preview is replaced by the editor
+--           (same outer size) and the buttons by Save / Cancel. The folder editor
+--           also offers the folders in use as buttons (up to PICK_MAX): one click
+--           puts that name in its input.
 --   meta    (0.2) a column beside the preview: the slot's kind with the
---           Favorite / Unfavorite toggle, target and notes with an Edit button
---           each, and a hunt's filter name. Below it,
---           level with the action row, "New practice" opens the practice
+--           Favorite / Unfavorite toggle, target, notes and (0.3.4) folder, each
+--           with an Edit button beside its title, and a hunt's filter name. Below
+--           it, level with the action row, "New practice" opens the practice
 --           composer (practice.lua) and "Import code" (0.3) reads a share code.
+--   search  (0.3.4) the list follows the search text as it is typed: store.list's
+--           query (name, seed, deck, notes, target, folder; a plain substring,
+--           any case), ANDed with the kind and folder cycles. A new query goes back
+--           to page 1; with no match the list says No saves match "<q>".
 --   share   (0.3, D3) "Share" beside Favorite copies the slot's share code
 --           (sharecode.encode) to the clipboard and shows it, truncated, on a
 --           line under the buttons. "Import code" decodes the clipboard into a
 --           panel in the preview's place: seed / deck / stake / notes, with
 --           Play / Cancel in the action row (or the decode error and Cancel).
---   The list, the preview, the buttons and the meta column are UIBoxes inside
---   G.UIT.O nodes ('saveslots_list', 'saveslots_detail', 'saveslots_actions',
---   'saveslots_meta'), swapped in place like the challenge list does. Any
---   mutation rebuilds the whole overlay instead, keeping the filter, the page
---   and the selection (module state below).
+--   The list, the preview, the buttons, the meta column, the page cycle and the
+--   search input are UIBoxes inside G.UIT.O nodes ('saveslots_list',
+--   'saveslots_detail', 'saveslots_actions', 'saveslots_meta', 'saveslots_pages',
+--   'saveslots_search'), swapped in place like the challenge list does. Any
+--   mutation rebuilds the whole overlay instead, keeping the filters, the search
+--   text, the page and the selection (module state below). Typing a search is
+--   not a mutation: it swaps the list and the page cycle only (a rebuild would
+--   drop the search input's hook mid-word).
 --
 -- API
 --   ui.install()               Registers G.FUNCS.saveslots_*. Runs once.
@@ -33,7 +44,8 @@
 --                              closes the overlay on the main menu.
 --
 -- Buttons (G.FUNCS names, so the smoke rig can ctx.click them)
---   saveslots_save_new    saves checkpoint.get() as a new slot named after the input
+--   saveslots_save_new    ("Save") saves checkpoint.get() as a new slot named after
+--                         the input
 --   saveslots_select      row click; e.config.ref_table.id is the slot id
 --   saveslots_page        page cycle callback
 --   saveslots_load        checkpoint.load_run(store.read(selected))
@@ -41,11 +53,16 @@
 --   saveslots_rename      store.rename(selected, input text); ignored when empty
 --   saveslots_delete      first press arms ("Confirm delete"), second deletes.
 --                         Every other action disarms it.
---   saveslots_kind_cycle  the kind filter's arrows (see kind_cycle for why they
+--   saveslots_kind_cycle  the kind filter's arrows (see own_cycle for why they
 --                         aren't 'option_cycle'); saveslots_kind is its callback
---   saveslots_edit_target / saveslots_edit_notes
+--   saveslots_folder_cycle the folder filter's arrows, likewise; saveslots_folder
+--                         is its callback. When its folder has no slot left, it
+--                         falls back to All folders.
+--   saveslots_edit_target / saveslots_edit_notes / saveslots_edit_folder
 --                         open the editor for the selected slot, its text input
---                         already hooked (TARGET_MAX / NOTES_MAX chars)
+--                         already hooked (TARGET_MAX / NOTES_MAX / FOLDER_MAX chars)
+--   saveslots_folder_pick a folder button in the folder editor; e.config.ref_table.folder
+--                         goes into the input (still hooked), Save or Return files it
 --   saveslots_edit_save   store.set_meta(selected, {<field> = text}); Return in
 --                         the input does the same. '' clears the field.
 --   saveslots_favorite    toggles store meta.favorite on the selected slot
@@ -59,6 +76,10 @@
 --                         import panel; a bad code shows the error (cancel sound)
 --   saveslots_import_play starts an unseeded run on the code's seed, deck, stake
 --   saveslots_import_cancel closes the import panel (as leaving the editor does)
+--   saveslots_search_watch (a func, run every frame on the search row) swaps the
+--                         list and the page cycle when the search text changed;
+--                         saveslots_cursor is the name and search inputs' cursor
+--                         (see steady_input)
 --
 -- Rules this file keeps
 --   * Disk only through store/checkpoint. Never G.ARGS.save_run (docs/SPEC.md
@@ -80,8 +101,21 @@
 --   * Only one 'option_cycle' button and one 'select_text_input' may precede
 --     the page cycle and the name input in the tree: 0.1.0 callers (and the
 --     ui_flow scenario) find them as the first of their kind. Hence the renamed
---     kind-cycle arrows, and the meta inputs existing only in the editor.
---   * vanilla text_input_key turns '0' into 'o'; the meta inputs inherit that.
+--     kind- and folder-cycle arrows, the search input after the name input, and
+--     the meta inputs existing only in the editor.
+--   * One text input per UIBox: vanilla registers one element per draw_layer per
+--     box, so a second input in a box hides the first. The search input has its
+--     own box; the editor's input lives in the detail box. The name and search
+--     inputs' cursors blink only while their own input is hooked (steady_input).
+--   * vanilla text_input_key turns '0' into 'o'. ui.install calls
+--     BHCore.install_digits(), and every input here (name, target, notes, folder,
+--     search) sets bh_digits = true, so a typed '0' stays a '0'.
+--   * The overlay keeps one outer size in every state (it fits the room: 0.3.4
+--     used its spare width for the folder cycle and the search input, as its
+--     height was already the room's). The meta column stays DETAIL_H for a hunt
+--     with a target, notes, a folder and a share line (line caps in meta_def).
+--     Neither a FOLDER_MAX folder in the cycle nor a full search widens the left
+--     column, and the name input beside Save has room for NAME_MAX letters.
 --   * The clipboard goes through vanilla's pair (copy_seed / paste_seed,
 --     button_callbacks.lua:940 and 1816): G.CLIPBOARD when G.F_LOCAL_CLIPBOARD is
 --     set, love.system's clipboard otherwise, so the rig can drive both ends.
@@ -99,7 +133,12 @@ local ui = {}
 
 local PAGE_SIZE = 8
 local NAME_MAX = 24
-local LIST_W = 4.6       -- left column width
+-- Left column width. 0.3.4 widened it (from 4.6) to put the kind and folder cycles
+-- side by side and the Save button beside the name input: the overlay already
+-- filled the room's height, and had width to spare.
+local LIST_W = 5.8
+local SAVE_W = 1.0       -- "Save" beside the name input (runs only); the input keeps
+                         -- LIST_W - 0.3 - SAVE_W, room for NAME_MAX average letters
 local ROW_H = 0.62
 -- The right column is this size in every state (message, preview, error), sized
 -- to preview.build's panel, and the action row is kept inside DETAIL_W.
@@ -128,15 +167,21 @@ end
 local EDIT = {
   target = {title = 'Edit target', prompt = 'Target', max = store.TARGET_MAX, scale = 0.4},
   notes = {title = 'Edit notes', prompt = 'Notes', max = store.NOTES_MAX, scale = 0.3},
+  folder = {title = 'Edit folder', prompt = 'Folder', max = store.FOLDER_MAX, scale = 0.4},
 }
+local SEARCH_MAX = 20        -- the search input's length: even 20 of the widest letter fit LIST_W
+local PICK_MAX = 12          -- existing folders offered as buttons in the folder editor
+local PICK_COLS = 3
 
 -- Survives rebuilds (and closing the overlay) for the rest of the session.
--- `name` is the text input's ref_table/ref_value; `edit_text` the editor's.
--- `kind` indexes FILTERS; `editing` is nil, 'target' or 'notes'. `share` is the
--- last code copied, {id, code}; `import` the open import panel, {t = decoded} or
--- {err = message}.
+-- `name` is the text input's ref_table/ref_value; `edit_text` the editor's;
+-- `query` the search input's. `kind` indexes FILTERS; `folder` is the folder
+-- cycle's choice: nil (All folders), false (Unfiled) or a folder name. `editing`
+-- is nil, 'target', 'notes' or 'folder'. `share` is the last code copied, {id,
+-- code}; `import` the open import panel, {t = decoded} or {err = message}.
 local state = {name = '', page = 1, selected = nil, confirm_delete = nil, kind = 1,
-  editing = nil, edit_text = '', share = nil, import = nil}
+  folder = nil, query = '', editing = nil, edit_text = '', share = nil, import = nil}
+local shown_query = nil  -- the query the list was last built for (the search watch compares)
 local unseed = nil       -- the seed Import's Play started, until its start_run clears `seeded`
 local imported = false   -- set only once an import fully succeeded; a failure or partial retries next open
 local installed = false
@@ -147,10 +192,19 @@ local function filter() return FILTERS[state.kind] or FILTERS[1] end
 
 local function is_favorite(slot) return slot.meta and slot.meta.favorite == true end
 
--- The slots the list shows: store.list under the current filter, favorites pinned
--- first (each group keeps store.list's newest-first order).
+local function trim(s) return (tostring(s or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
+
+-- The search text as store.list matches it ('' when blank).
+local function query() return trim(state.query) end
+
+-- True when the folder cycle or the search box narrows the list.
+local function narrowed() return state.folder ~= nil or query() ~= '' end
+
+-- The slots the list shows: store.list under the current filter, folder and
+-- search, favorites pinned first (each group keeps store.list's newest-first order).
 local function list_slots()
-  local all = store.list({kind = filter().kind, favorite = filter().favorite})
+  local all = store.list({kind = filter().kind, favorite = filter().favorite, folder = state.folder,
+    query = state.query})
   local out = {}
   for _, s in ipairs(all) do if is_favorite(s) then out[#out+1] = s end end
   for _, s in ipairs(all) do if not is_favorite(s) then out[#out+1] = s end end
@@ -178,8 +232,6 @@ local function page_to_selected(slots)
   local _, i = find_slot(slots, state.selected)
   if i then state.page = math.ceil(i/PAGE_SIZE) end
 end
-
-local function trim(s) return (tostring(s or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
 
 -- An on-screen message in the style of vanilla attention_text (as Brainstorm's
 -- saveManagerAlert uses it, but our own). attention_text builds its box in an
@@ -262,8 +314,11 @@ local function list_page_def(slots)
     rows[#rows+1] = slot_row(slots[i])
   end
   if #rows == 0 then
-    rows[1] = {n=G.UIT.R, config={align = 'cm', padding = 0.1}, nodes={
-      {n=G.UIT.T, config={text = filter().empty, scale = 0.4, colour = G.C.UI.TEXT_LIGHT}},
+    -- Plain ASCII quotes: the game font has no curly ones.
+    local text = query() ~= '' and 'No saves match "'..query()..'"'
+      or state.folder ~= nil and 'Nothing matches these filters' or filter().empty
+    rows[1] = {n=G.UIT.R, config={align = 'cm', padding = 0.1, maxw = LIST_W - 0.3}, nodes={
+      {n=G.UIT.T, config={id = 'saveslots_list_empty', text = text, scale = 0.4, colour = G.C.UI.TEXT_LIGHT}},
     }}
   end
   return {n=G.UIT.ROOT, config={align = 'tm', padding = 0.05, colour = G.C.CLEAR}, nodes=rows}
@@ -305,38 +360,82 @@ local function wrap(text, n)
   return lines
 end
 
--- The target/notes editor, in the preview's place and outer size. Its input is
--- the only 'select_text_input' in this box; editor_hook() hooks it on open.
+-- The folder editor's extra rows: the folders already in use as buttons, so one
+-- click puts a name in the input (saveslots_folder_pick). At most PICK_MAX; the
+-- rest are typed.
+local function folder_picks()
+  local folders = store.folders()
+  local rows = {
+    {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={
+      {n=G.UIT.T, config={text = #folders > 0 and 'Existing folders' or 'No folders yet: type a name to make one',
+        scale = 0.32, colour = G.C.UI.TEXT_LIGHT}},
+    }},
+  }
+  local row
+  for i = 1, math.min(#folders, PICK_MAX) do
+    if (i - 1) % PICK_COLS == 0 then
+      row = {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={}}
+      rows[#rows+1] = row
+    end
+    local chosen = folders[i] == trim(state.edit_text)
+    row.nodes[#row.nodes+1] = UIBox_button({id = 'saveslots_folder_pick_'..i, label = {folders[i]},
+      button = 'saveslots_folder_pick', ref_table = {folder = folders[i]},
+      colour = chosen and darken(G.C.BLUE, 0.3) or G.C.BLUE, minw = 2.3, minh = 0.5, scale = 0.32, col = true})
+  end
+  if #folders > PICK_MAX then
+    rows[#rows+1] = {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={
+      {n=G.UIT.T, config={text = (#folders - PICK_MAX)..' more: type the name', scale = 0.3,
+        colour = G.C.UI.TEXT_INACTIVE}},
+    }}
+  end
+  return rows
+end
+
+-- The target/notes/folder editor, in the preview's place and outer size. Its
+-- input is the only 'select_text_input' in this box; editor_hook() hooks it on open.
 local function editor_def(slot)
   local ed = EDIT[state.editing]
-  return {n=G.UIT.ROOT, config={align = 'cm', colour = G.C.BLACK, minw = DETAIL_W, minh = DETAIL_H, r = 0.1}, nodes={
-    {n=G.UIT.C, config={align = 'cm', padding = 0.15}, nodes={
-      {n=G.UIT.R, config={align = 'cm'}, nodes={
-        {n=G.UIT.T, config={text = ed.title, scale = 0.6, colour = G.C.UI.TEXT_LIGHT, shadow = true}},
-      }},
-      {n=G.UIT.R, config={align = 'cm', maxw = DETAIL_W - 0.6}, nodes={
-        {n=G.UIT.T, config={text = slot.name or '?', scale = 0.4, colour = G.C.JOKER_GREY}},
-      }},
-      {n=G.UIT.R, config={align = 'cm', padding = 0.1}, nodes={
-        create_text_input({w = DETAIL_W - 0.8, h = 0.6, max_length = ed.max, extended_corpus = true,
-          text_scale = ed.scale, ref_table = state, ref_value = 'edit_text', prompt_text = ed.prompt,
-          callback = function() G.FUNCS.saveslots_edit_return() end}),
-      }},
-      {n=G.UIT.R, config={align = 'cm'}, nodes={
-        {n=G.UIT.T, config={text = 'Up to '..ed.max..' characters. Enter saves, an empty '..ed.prompt:lower()
-          ..' clears it.', scale = 0.3, colour = G.C.UI.TEXT_LIGHT}},
-      }},
+  local rows = {
+    {n=G.UIT.R, config={align = 'cm'}, nodes={
+      {n=G.UIT.T, config={text = ed.title, scale = 0.6, colour = G.C.UI.TEXT_LIGHT, shadow = true}},
     }},
+    {n=G.UIT.R, config={align = 'cm', maxw = DETAIL_W - 0.6}, nodes={
+      {n=G.UIT.T, config={text = slot.name or '?', scale = 0.4, colour = G.C.JOKER_GREY}},
+    }},
+    {n=G.UIT.R, config={align = 'cm', padding = 0.1}, nodes={
+      create_text_input({w = DETAIL_W - 0.8, h = 0.6, max_length = ed.max, extended_corpus = true,
+        bh_digits = true, text_scale = ed.scale, ref_table = state, ref_value = 'edit_text', prompt_text = ed.prompt,
+        callback = function() G.FUNCS.saveslots_edit_return() end}),
+    }},
+    {n=G.UIT.R, config={align = 'cm'}, nodes={
+      {n=G.UIT.T, config={text = 'Up to '..ed.max..' characters. Enter saves, an empty '..ed.prompt:lower()
+        ..' clears it.', scale = 0.3, colour = G.C.UI.TEXT_LIGHT}},
+    }},
+  }
+  if state.editing == 'folder' then
+    for _, r in ipairs(folder_picks()) do rows[#rows+1] = r end
+  end
+  return {n=G.UIT.ROOT, config={align = 'cm', colour = G.C.BLACK, minw = DETAIL_W, minh = DETAIL_H, r = 0.1}, nodes={
+    {n=G.UIT.C, config={align = 'cm', padding = 0.15}, nodes=rows},
   }}
 end
 
--- One labelled block of the meta column: a small title, the text (wrapped, or
--- `none` greyed out) on a dark plate, and an optional Edit button.
-local function meta_block(id, title, text, none, fn)
+-- One labelled block of the meta column: a small title (with an Edit button
+-- beside it when `fn` is given; 0.3.4 moved it up from under the plate, so a hunt
+-- with a target, notes and a folder still fits DETAIL_H), then the text on a dark
+-- plate: wrapped, at most `max_lines` lines (the last one then ends in '...'), or
+-- `none` greyed out.
+local function meta_block(id, title, text, none, fn, max_lines)
   local lines = text and wrap(text, META_CHARS) or {}
+  if max_lines and #lines > max_lines then
+    local last = lines[max_lines]
+    lines = {unpack(lines, 1, max_lines)}
+    lines[max_lines] = (#last + 3 <= META_CHARS and last or last:sub(1, META_CHARS - 3))..'...'
+  end
   local rows = {}
   for i, l in ipairs(lines) do
-    rows[i] = {n=G.UIT.R, config={align = 'cm', maxw = META_W - 0.4}, nodes={
+    -- (maxw: what fits inside the plate below, so wide glyphs never widen the column)
+    rows[i] = {n=G.UIT.R, config={align = 'cm', maxw = META_W - 0.48}, nodes={
       {n=G.UIT.T, config={id = id..'_'..i, text = l, scale = 0.34, colour = G.C.WHITE, shadow = true}},
     }}
   end
@@ -345,20 +444,27 @@ local function meta_block(id, title, text, none, fn)
       {n=G.UIT.T, config={id = id..'_none', text = none, scale = 0.32, colour = G.C.UI.TEXT_INACTIVE}},
     }}
   end
-  local nodes = {
-    {n=G.UIT.R, config={align = 'cm'}, nodes={
+  -- The title stays centred: an empty column the Edit button's width balances it.
+  local EDIT_W = 0.9
+  local header = {
+    {n=G.UIT.C, config={align = 'cm', minw = META_W - 0.4 - (fn and 2*EDIT_W or 0)}, nodes={
       {n=G.UIT.T, config={text = title, scale = 0.32, colour = G.C.UI.TEXT_LIGHT}},
     }},
-    {n=G.UIT.R, config={align = 'cm', padding = 0.08, r = 0.1, minw = META_W - 0.3, minh = 0.5,
+  }
+  if fn then
+    table.insert(header, 1, {n=G.UIT.C, config={minw = EDIT_W}, nodes={}})
+    header[3] = UIBox_button({label = {'Edit'}, button = fn, colour = G.C.GREEN, minw = EDIT_W, minh = 0.36,
+      scale = 0.3, col = true})
+  end
+  local nodes = {
+    {n=G.UIT.R, config={align = 'cm'}, nodes=header},
+    -- (META_W - 0.32: with the block's padding, as wide as the empty column's content,
+    -- so the column is META_W with or without a slot selected)
+    {n=G.UIT.R, config={align = 'cm', padding = 0.08, r = 0.1, minw = META_W - 0.32, minh = 0.5,
         colour = G.C.UI.TRANSPARENT_DARK}, nodes={
       {n=G.UIT.C, config={align = 'cm'}, nodes=rows},
     }},
   }
-  if fn then
-    nodes[#nodes+1] = {n=G.UIT.R, config={align = 'cm', padding = 0.03}, nodes={
-      UIBox_button({label = {'Edit'}, button = fn, colour = G.C.GREEN, minw = 1.4, minh = 0.45, scale = 0.34}),
-    }}
-  end
   return {n=G.UIT.R, config={align = 'cm', padding = 0.06, r = 0.1, colour = G.C.L_BLACK, minw = META_W - 0.2}, nodes={
     {n=G.UIT.C, config={align = 'cm'}, nodes=nodes},
   }}
@@ -405,14 +511,20 @@ local function meta_def(slot)
       }},
     }}
     local editable = not state.editing
+    -- Line caps keep the tallest column (a hunt with all four, and a share line)
+    -- inside DETAIL_H: a target (24 chars) and a folder (16) never need more; 60
+    -- chars of notes wrap to 4 lines unless long words waste the ends, and a filter
+    -- name to 2. The editor shows the full text.
     nodes[#nodes+1] = meta_block('saveslots_meta_target', 'Target', m.target, 'No target',
-      editable and 'saveslots_edit_target' or nil)
+      editable and 'saveslots_edit_target' or nil, 2)
     nodes[#nodes+1] = meta_block('saveslots_meta_notes', 'Notes', m.notes, 'No notes',
-      editable and 'saveslots_edit_notes' or nil)
+      editable and 'saveslots_edit_notes' or nil, 4)
+    nodes[#nodes+1] = meta_block('saveslots_meta_folder', 'Folder', type(m.folder) == 'string' and m.folder or nil,
+      'No folder', editable and 'saveslots_edit_folder' or nil, 1)
     if kind == 'hunt' then
       local origin = type(m.origin) == 'table' and m.origin or {}
       nodes[#nodes+1] = meta_block('saveslots_meta_hunt', 'Hunt filter',
-        type(origin.filter_name) == 'string' and origin.filter_name or nil, 'Unknown')
+        type(origin.filter_name) == 'string' and origin.filter_name or nil, 'Unknown', nil, 2)
     end
   else
     nodes[1] = {n=G.UIT.R, config={align = 'cm'}, nodes={
@@ -557,7 +669,8 @@ local function detail_box(slots, parent)
   if state.import then return UIBox{definition = import_def(), config = cfg} end
   local slot = state.selected and find_slot(slots, state.selected)
   if not slot then
-    local text = #slots == 0 and ((filter().favorite or filter().kind and filter().kind ~= 'save') and filter().empty
+    local text = #slots == 0 and (narrowed() and 'Nothing matches these filters'
+      or (filter().favorite or filter().kind and filter().kind ~= 'save') and filter().empty
       or in_run() and 'Save the current run to create a slot' or 'No saves yet')
       or 'Select a save'
     return UIBox{definition = message_def(text), config = cfg}
@@ -605,50 +718,148 @@ local function actions_def(slots)
   return {n=G.UIT.ROOT, config={align = 'cm', padding = 0.08, colour = G.C.CLEAR, minh = 0.8}, nodes=nodes}
 end
 
--- The kind filter. Its arrows get their own button name, forwarding to vanilla's
--- option_cycle: it sits above the page cycle, and 'option_cycle' must keep
--- finding the page cycle first (see Rules). The controller clicks cycle
--- arrows by position (focused.children[1]/[3]), not by name, so pads still work.
-local function kind_cycle()
-  local labels = {}
-  for i, f in ipairs(FILTERS) do labels[i] = f.label end
-  local t = create_option_cycle({id = 'saveslots_kind', scale = 0.8, h = 0.3, w = 3.2, options = labels,
-    opt_callback = 'saveslots_kind', current_option = state.kind, colour = G.C.RED, no_pips = true})
+-- The kind and folder cycles share one row (see LIST_W): their scale, and the
+-- folder cycle's width before scaling.
+local CYCLE_SCALE, FOLDER_CYCLE_W = 0.6, 3.7
+
+-- A vanilla option cycle whose arrows call `button` (forwarding to vanilla's
+-- option_cycle) instead of 'option_cycle'. The kind and folder cycles sit above
+-- the page cycle, and 'option_cycle' must keep finding the page cycle first (see
+-- Rules). The controller clicks cycle arrows by position
+-- (focused.children[1]/[3]), not by name, so pads still work.
+-- `pad` replaces the cycle's own padding (0.1), to fit two cycles in one row.
+local function own_cycle(args, button, pad)
+  local t = create_option_cycle(args)
   local function retarget(node)
     if type(node) ~= 'table' then return end
-    if node.config and node.config.button == 'option_cycle' then node.config.button = 'saveslots_kind_cycle' end
+    if node.config and node.config.button == 'option_cycle' then node.config.button = button end
+    if pad and node.config and node.config.id == args.id then node.config.padding = pad end
     for _, child in ipairs(node.nodes or {}) do retarget(child) end
   end
   retarget(t)
   return t
 end
 
-local function overlay_def(slots)
+-- The kind filter.
+local function kind_cycle()
+  local labels = {}
+  for i, f in ipairs(FILTERS) do labels[i] = f.label end
+  return own_cycle({id = 'saveslots_kind', scale = CYCLE_SCALE, h = 0.3, w = 2.6, options = labels,
+    opt_callback = 'saveslots_kind', current_option = state.kind, colour = G.C.RED, no_pips = true},
+    'saveslots_kind_cycle', 0.05)
+end
+
+-- The folder filter (0.3.4): All folders, each folder in use (store.folders), then
+-- Unfiled. `folders` rides along in the cycle's args, so the callback maps the
+-- option index back to a folder even when a folder is named like a fixed option.
+-- A label wider than the cycle (FOLDER_MAX wide glyphs) is scaled down to fit, the
+-- way DynaText:init applies its own maxw (create_option_cycle cannot pass one), so
+-- no folder widens the column. Every change rebuilds the overlay, so the label is
+-- sized once per build.
+local function folder_cycle(folders)
+  local opts, cur = {'All folders'}, 1
+  for i, f in ipairs(folders) do
+    opts[i + 1] = f
+    if state.folder == f then cur = i + 1 end
+  end
+  opts[#opts + 1] = 'Unfiled'
+  if state.folder == false then cur = #opts end
+  local t = own_cycle({id = 'saveslots_folder', scale = CYCLE_SCALE, h = 0.3, w = FOLDER_CYCLE_W, options = opts,
+    opt_callback = 'saveslots_folder', current_option = cur, colour = G.C.BLUE, no_pips = true,
+    folders = folders}, 'saveslots_folder_cycle', 0.05)
+  local maxw = FOLDER_CYCLE_W*CYCLE_SCALE - 0.1
+  local function cap(node)
+    if type(node) ~= 'table' then return end
+    local obj = node.config and node.config.object
+    if getmetatable(obj) == DynaText and obj.config.W > maxw then
+      obj.config.maxw = maxw
+      obj.scale = obj.scale*maxw/obj.config.W
+      obj:update_text(true)
+    end
+    for _, child in ipairs(node.nodes or {}) do cap(child) end
+  end
+  cap(t)
+  return t
+end
+
+-- create_text_input(args) for an input that shares the screen with another (the
+-- name and search inputs). Vanilla's cursor ('position', func 'flash') blinks in
+-- every input whenever any input is hooked, and changes its width then, which
+-- lays the input's box out again: two cursors show, and in a nested box (the
+-- search's) the letters end up misplaced. Here the cursor keeps one width and
+-- blinks only while its own input is hooked (saveslots_cursor), and the prompt is
+-- set before the first layout, which then has it.
+local function steady_input(args)
+  local t = create_text_input(args)
+  local function walk(node)
+    if type(node) ~= 'table' then return end
+    -- 'position' in vanilla; '<id>_position' under Steamodded and HandyBalatro
+    local id = node.config and node.config.id
+    if type(id) == 'string' and (id == 'position' or id:sub(-9) == '_position') then
+      node.config.func = 'saveslots_cursor'
+    end
+    for _, child in ipairs(node.nodes or {}) do walk(child) end
+  end
+  walk(t)
+  if args.text.ref_table[args.text.ref_value] == '' then args.current_prompt_text = args.prompt_text end
+  return t
+end
+
+-- The search input, in its own box ('saveslots_search'), after the name input in
+-- the tree (0.1.0 callers click the first text input, see Rules). Its own box:
+-- vanilla keeps one element per draw_layer per UIBox (UIElement:set_values) and a
+-- text input draws on layers 1 and 2, so a second input in the overlay's box
+-- would stop the name input from being drawn.
+local function search_def()
+  return {n=G.UIT.ROOT, config={align = 'cm', padding = 0, colour = G.C.CLEAR}, nodes={
+    steady_input({w = LIST_W - 0.2, max_length = SEARCH_MAX, extended_corpus = true, bh_digits = true,
+      ref_table = state, ref_value = 'query', prompt_text = 'Search'}),
+  }}
+end
+
+-- The page cycle, in its own box ('saveslots_pages'), so a search can refresh it
+-- without rebuilding the overlay.
+local function pages_def(slots)
   local pages = {}
   for i = 1, page_count(slots) do
     pages[i] = localize('k_page')..' '..i..'/'..page_count(slots)
   end
+  return {n=G.UIT.ROOT, config={align = 'cm', padding = 0, colour = G.C.CLEAR}, nodes={
+    create_option_cycle({id = 'saveslots_page', scale = 0.8, h = 0.3, w = 2.8, options = pages,
+      cycle_shoulders = true, opt_callback = 'saveslots_page', current_option = state.page,
+      colour = G.C.RED, no_pips = true, focus_args = {snap_to = true}}),
+  }}
+end
 
-  local left = {
-    {n=G.UIT.R, config={align = 'cm'}, nodes={kind_cycle()}},
-    {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={
-      create_text_input({w = LIST_W - 0.2, max_length = NAME_MAX, extended_corpus = true,
-        ref_table = state, ref_value = 'name', prompt_text = 'Save name'}),
-    }},
+local function overlay_def(slots, folders)
+  -- The name input, and in a run the Save button beside it (saves the run as a new
+  -- slot named after the input).
+  local name_row = {
+    steady_input({w = LIST_W - 0.2 - (in_run() and SAVE_W + 0.1 or 0), max_length = NAME_MAX,
+      extended_corpus = true, bh_digits = true, ref_table = state, ref_value = 'name', prompt_text = 'Save name'}),
   }
   if in_run() then
-    left[#left+1] = {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={
-      UIBox_button({label = {'Save current run'}, button = 'saveslots_save_new', colour = G.C.GREEN,
-        minw = LIST_W - 0.2, minh = 0.6, scale = 0.42}),
-    }}
+    name_row[2] = {n=G.UIT.B, config={w = 0.1, h = 0.1}}
+    name_row[3] = UIBox_button({id = 'saveslots_save_new', label = {'Save'}, button = 'saveslots_save_new',
+      colour = G.C.GREEN, minw = SAVE_W, minh = 0.6, scale = 0.42, col = true})
   end
+  local left = {
+    {n=G.UIT.R, config={align = 'cm'}, nodes={
+      {n=G.UIT.C, config={align = 'cm'}, nodes={kind_cycle()}},
+      {n=G.UIT.C, config={align = 'cm'}, nodes={folder_cycle(folders)}},
+    }},
+    {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes=name_row},
+    -- The search input's box (search_def). The watch refreshes the list as its
+    -- text changes (saveslots_search_watch).
+    {n=G.UIT.R, config={align = 'cm', padding = 0.05, func = 'saveslots_search_watch'}, nodes={
+      {n=G.UIT.O, config={id = 'saveslots_search', object = Moveable()}},
+    }},
+  }
   left[#left+1] = {n=G.UIT.R, config={align = 'tm', minh = PAGE_SIZE*(ROW_H + 0.14) + 0.1, minw = LIST_W}, nodes={
     {n=G.UIT.O, config={id = 'saveslots_list', object = Moveable()}},
   }}
   left[#left+1] = {n=G.UIT.R, config={align = 'cm', padding = 0.05}, nodes={
-    create_option_cycle({id = 'saveslots_page', scale = 0.8, h = 0.3, w = 2.8, options = pages,
-      cycle_shoulders = true, opt_callback = 'saveslots_page', current_option = state.page,
-      colour = G.C.RED, no_pips = true, focus_args = {snap_to = true}}),
+    {n=G.UIT.O, config={id = 'saveslots_pages', object = Moveable()}},
   }}
 
   return create_UIBox_generic_options({
@@ -696,8 +907,21 @@ local function refresh_detail(slots)
 end
 
 local function refresh_list(slots)
+  shown_query = state.query
   swap('saveslots_list', function(node)
     return UIBox{definition = list_page_def(slots), config = {offset = {x = 0, y = 0}, align = 'cm', parent = node}}
+  end)
+end
+
+local function refresh_search()
+  swap('saveslots_search', function(node)
+    return UIBox{definition = search_def(), config = {offset = {x = 0, y = 0}, align = 'cm', parent = node}}
+  end)
+end
+
+local function refresh_pages(slots)
+  swap('saveslots_pages', function(node)
+    return UIBox{definition = pages_def(slots), config = {offset = {x = 0, y = 0}, align = 'cm', parent = node}}
   end)
 end
 
@@ -725,14 +949,24 @@ local function editor_hook()
 end
 
 local function open(animate)
+  -- The folder cycle falls back to All folders once its folder has no slot left.
+  local folders = store.folders()
+  if type(state.folder) == 'string' then
+    local kept = false
+    for _, f in ipairs(folders) do kept = kept or f == state.folder end
+    if not kept then state.folder = nil end
+  end
   local slots = list_slots()
   state.share = nil   -- any rebuild follows a change that could make the code stale
   clamp_state(slots)
   if not state.selected then state.editing = nil end
   G.SETTINGS.paused = true
-  G.FUNCS.overlay_menu{definition = overlay_def(slots)}
+  shown_query = state.query
+  G.FUNCS.overlay_menu{definition = overlay_def(slots, folders)}
   if not animate and G.OVERLAY_MENU then G.OVERLAY_MENU:hard_set_VT() end
+  refresh_search()
   refresh_list(slots)
+  refresh_pages(slots)
   refresh_detail(slots)
   refresh_actions(slots)
   refresh_meta(slots)
@@ -769,6 +1003,8 @@ end
 function ui.install()
   if installed then return end
   installed = true
+  -- Typed '0's stay '0' in the inputs made with bh_digits (every input here).
+  if BHCore and BHCore.install_digits then BHCore.install_digits() end
 
   G.FUNCS.saveslots_open = function(e)
     local import_err = nil
@@ -838,6 +1074,59 @@ function ui.install()
     state.confirm_delete = nil
     close_editor()
     open(false)
+  end
+
+  -- The folder filter (0.3.4), rebuilt like the kind filter. Option 1 is All
+  -- folders, the last is Unfiled, and the ones between are cycle_config.folders.
+  G.FUNCS.saveslots_folder_cycle = function(e) return G.FUNCS.option_cycle(e) end
+  G.FUNCS.saveslots_folder = function(args)
+    local cfg = args and args.cycle_config
+    if not cfg then return end
+    local i = cfg.current_option
+    if i == 1 then state.folder = nil
+    elseif i == #cfg.options then state.folder = false
+    else state.folder = (cfg.folders or {})[i - 1] end
+    state.page = 1
+    state.confirm_delete = nil
+    close_editor()
+    open(false)
+  end
+
+  -- The name and search inputs' cursor: blinks as vanilla's flash
+  -- (button_callbacks.lua G.FUNCS.flash) does, but only while its own input is
+  -- hooked (the hook is the cursor's parent), and never changes its width (see
+  -- steady_input).
+  G.FUNCS.saveslots_cursor = function(e)
+    local hook = G.CONTROLLER.text_input_hook
+    if hook and hook == e.parent and math.floor(G.TIMERS.REAL*2)%2 == 0 then
+      e.config.colour[4] = 1
+    else
+      e.config.colour[4] = 0
+    end
+  end
+
+  -- The search box (0.3.4). Runs every frame on the search row: when the text
+  -- changed, only the list and the page cycle are swapped (page 1), never the whole
+  -- overlay, which would drop the input's hook mid-word. A selection the search
+  -- hides is dropped, as a filter drops it, and only then are the detail, actions
+  -- and meta boxes swapped too. With nothing selected the detail is a message
+  -- ("Select a save" or "Nothing matches these filters"), swapped to follow.
+  G.FUNCS.saveslots_search_watch = function(e)
+    if state.query == shown_query or not G.OVERLAY_MENU or e.UIBox ~= G.OVERLAY_MENU then return end
+    state.page = 1
+    local slots = list_slots()
+    refresh_list(slots)
+    refresh_pages(slots)
+    if state.selected and not find_slot(slots, state.selected) then
+      state.selected = nil
+      state.confirm_delete = nil
+      close_editor()
+      refresh_detail(slots)
+      refresh_actions(slots)
+      refresh_meta(slots)
+    elseif not state.selected then
+      refresh_detail(slots)
+    end
   end
 
   G.FUNCS.saveslots_save_new = function(e)
@@ -953,6 +1242,18 @@ function ui.install()
   end
   G.FUNCS.saveslots_edit_target = function(e) edit('target') end
   G.FUNCS.saveslots_edit_notes = function(e) edit('notes') end
+  G.FUNCS.saveslots_edit_folder = function(e) edit('folder') end
+
+  -- A folder button in the folder editor: its name goes into the input (the
+  -- editor box is rebuilt with it and hooked again); Save or Return then files it.
+  G.FUNCS.saveslots_folder_pick = function(e)
+    local f = e and e.config and e.config.ref_table and e.config.ref_table.folder
+    if state.editing ~= 'folder' or type(f) ~= 'string' or not G.OVERLAY_MENU then return end
+    release_editor_hook()
+    state.edit_text = f
+    refresh_detail(list_slots())
+    editor_hook()
+  end
 
   -- Writes the editor's text to the selected slot. Returns the alert to show.
   local function commit()

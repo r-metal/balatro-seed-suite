@@ -15,7 +15,7 @@ Every prediction is checked against the real game.
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb68b?style=flat-square)](LICENSE)
 
 **[Download](https://github.com/r-metal/balatro-seed-suite/releases/latest/download/BalatroSeedSuite.zip)** ·
-[Install](#install) · [Features](#features) · [How does it know?](#how-does-it-know) · [FAQ](#faq) · [Changelog](CHANGELOG.md)
+**[Website](https://bss.r-metal.tech/)** · [Install](#install) · [Features](#features) · [How does it know?](#how-does-it-know) · [FAQ](#faq) · [Changelog](CHANGELOG.md)
 
 <img src="docs/media/oracle.webp" width="880" alt="The Seed Oracle open in a shop: this ante's skip tags, boss, voucher and Soul legendary, the shop on the shelf and after each reroll, and what each Arcana pack holds">
 

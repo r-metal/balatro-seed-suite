@@ -210,6 +210,8 @@ testing and the test rig are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **Balatro** is by LocalThunk and published by Playstack. This project is not affiliated with or endorsed by either.
 - **[lovely](https://github.com/ethangreen-dev/lovely-injector)** by ethangreen-dev makes Lua mods like these possible.
+- The design of the **[website](https://bss.r-metal.tech/)** is based on the
+  [Balatro Save Editor site](https://bse.burnttoasters.com/) by [BurntToasters](https://github.com/BurntToasters).
 - This repository contains **no game code or assets**. The test rig runs the game from your own copy.
 
 [MIT](LICENSE) © 2026 The Balatro Seed Suite contributors

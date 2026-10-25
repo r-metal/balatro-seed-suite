@@ -14,7 +14,8 @@
 --     {kind = 'voucher', ante, key = 'v_...', by = bool (false)}
 --       by (T-313a, boss T-375; additive: without it a clause means exactly
 --       its ante): "by ante N", N = ante. A voucher: the shop Voucher of some
---       ante 1..N, each as the plain clause predicts it (no purchases). A tag:
+--       ante 1..N, each as the plain clause predicts it (the walk's purchases:
+--       Policies, voucher clauses). A tag:
 --       key is on the clause's blind (Small, Big or any) in some ante 1..N. A
 --       boss: key is the Boss of some ante 1..N, each as the plain clause
 --       predicts it (no boss rerolls). Only these three kinds take by (a joker
@@ -73,14 +74,36 @@
 --                                group's members in the group's place (the
 --                                clauses the walk's needs are made of). With
 --                                no group it is f.clauses itself: read only.
+--   filter.prerequisites(key) -> the vouchers `key` requires, and what those
+--                                require (a list, any order).
+--   filter.purchase_rules(f)  -> the walk's purchase rules (Policies: voucher
+--                                clauses), one per voucher a positive voucher
+--                                clause buys (members included):
+--                                {clause, key, lo, hi, own}. key is bought at
+--                                the first ante lo..hi whose shop offers it;
+--                                own: the clause's own voucher, else one it
+--                                requires. None for Hieroglyph or Petroglyph.
+--   filter.voucher_findable(key) -> true, or false and the voucher key needs
+--                                that the walk never buys (Policies: voucher
+--                                clauses; Petroglyph's Hieroglyph). validate
+--                                refuses a voucher clause on such a key.
 --   details = {checked = <clauses evaluated>, results = {[i] = {ok, ...}},
---              tag_packs = {[a] = <packs>} or nil}
+--              tag_packs = {[a] = <packs>} or nil,
+--              skips = {[a] = {Small = tag, Big = tag}} or nil,
+--              bought = {[a] = voucher key} or nil,
+--              walked = <the highest ante the walk passed, 0 if none>}
 --   results is indexed by the clause's position in f.clauses. Unevaluated
 --   clauses (the short-circuit) have no entry. checked counts top-level
 --   entries. tag_packs holds the tag packs (soul_in_pack from_tag's packs
---   shape) of every chained ante the eval walked, whether or not a from_tag
---   clause there was evaluated (a group member may not be): route.lua reads
---   the skips off it. What each result carries:
+--   shape) the walk opened: every chained ante it walked, whether or not a
+--   from_tag clause there was evaluated (a group member may not be), and any
+--   other walked ante where a taken pack tag opened one. skips holds the
+--   blinds the walk skipped, per walked ante (taken tags, a chained ante's
+--   pack tags), and ante 1's when it was not walked but both its blinds are
+--   skipped (Policies: the forced Buffoon). bought holds the vouchers the
+--   walk bought (Policies: voucher clauses), at every ante the eval drew a
+--   voucher it could buy at. route.lua replays all three. What each
+--   result carries:
 --     group: hit = the index (in the group's clauses) of the member that
 --       held, nil on a miss; results = {[m] = member details}, the members
 --       evaluated, each with its own ok and its kind's fields below;
@@ -119,7 +142,11 @@
 -- group members included:
 --   * tags(S, a) and voucher(S, a) once per ante (per-ante streams, order-free;
 --     a by clause reads antes 1, 2, ... N through the same memo and stops at
---     the first that holds, so no ante is drawn twice for it either);
+--     the first that holds, so no ante is drawn twice for it either). Ante
+--     a's voucher pool leaves out what the walk bought below a (Policies:
+--     voucher clauses), so every lower ante the walk may buy at is drawn
+--     first, in ascending order; the walk draws those too, to know what it
+--     buys where (still once each, through the memo);
 --     boss(S, 1..a) in ascending order (the 'boss' stream is global), each
 --     ante once: a boss clause with by reads bosses 1, 2, ... N through the
 --     same memo and stops at the first that holds, and a later boss clause
@@ -147,6 +174,47 @@
 --     result, in a plain filter as in a group.)
 --
 -- Policies (what a hit promises; predict.lua's header has the stream map)
+--   tag clauses are taken: the player takes a tag by skipping its blind, so
+--     wherever a positive tag clause (top level or group member; not an
+--     excluded one) holds, the walk skips that blind: its shop never happens.
+--     A plain clause takes its blind at its ante (Small first for blind
+--     'any'), a by clause the first ante and blind it holds at (as its details
+--     say). A skipped blind whose tag gives a pack opens it at the skip
+--     (predict.ALL_TAG_PACKS: Charm, Meteor, Ethereal, Standard, Buffoon),
+--     closed with nothing taken. Tags that act on a later shop or the jokers
+--     (Uncommon, Rare, edition tags, Top-up, Voucher, Boss, Double...) are not
+--     modelled: a walk that takes one is conditional on it. 0.4.0 played such
+--     a blind instead, so a hit could rest on a shop the tag's skip removes.
+--     The forced first Buffoon lands in the run's first shop: ante 1's, or ante
+--     2's Boss shop when both ante-1 blinds are skipped (taken tags; chained
+--     pack tags; or, when ante 1 is not walked, a separate from_tag branch
+--     there, which skips its pack-tag blinds).
+--   voucher clauses are bought: wherever a positive voucher clause (top level
+--     or group member; not an excluded one) holds, the player buys that
+--     voucher, a plain clause at its ante and a by clause at the first ante it
+--     holds at. A tier-2 voucher's clause also buys what it `requires` (and
+--     what that requires): at the first ante below the clause's ante (N for
+--     by) whose shop offers it. Each voucher is bought once, at the first ante
+--     a rule buys it, so a later clause on it never sees it again. Ante a's
+--     voucher is drawn with every purchase below a redeemed (predict.voucher's
+--     used): the pool leaves those out and admits their tier-2 vouchers. 0.4.0
+--     bought nothing, so no tier-2 voucher ever showed, and a hit beside a
+--     voucher clause could rest on that voucher left unbought.
+--     The purchase is made in the ante's first shop right after entering (the
+--     shop after the previous Boss; at ante 1 the first blind played), and
+--     what it changes for generation holds for the rest of the walk
+--     (state.redeem: used_vouchers, the rates, Overstock's slot, filled at
+--     once in that shop). A purchase at an ante the walk does not walk is
+--     applied to S there all the same; a separate tag branch's packs see the
+--     vouchers bought by their skips (Omen Globe), the only effect they read.
+--     Ante 1 offers no voucher when both its blinds are skipped (taken tags,
+--     or the pack tags a from_tag clause there skips): a voucher clause does
+--     not hold at ante 1 then. Hieroglyph and Petroglyph are never bought
+--     (state.REWINDS: the -1 ante replays an ante, which the walk does not
+--     model), so a Hieroglyph clause holds where it is offered, and a
+--     Petroglyph clause, which could only hold after a Hieroglyph purchase,
+--     is refused by validate. Discounts (Clearance Sale, Liquidation, Reroll
+--     Surplus/Glut) change no draw.
 --   soul_in_pack from_tag: at ante A, every Small/Big blind whose tag is a
 --     Charm Tag (Mega Arcana, 5 cards) or an Ethereal Tag (Spectral Pack, 2
 --     cards) is skipped, Small first. Vanilla opens that pack at the skip
@@ -162,7 +230,7 @@
 --   The walk: every walked ante is one predict.ante_walk(S, A, policy) call
 --   (docs/bh-core.md § sim.predict), in ascending ante order; the policies
 --   below are the skip / rerolls / open / cards it is given.
---   shop clauses: no skips, no purchases, the plan policy per shop (enter,
+--   shop clauses: no skips but taken tags, no purchases but bought vouchers, the plan policy per shop (enter,
 --     2 packs, R rerolls, open every pack in slot order when a clause needs
 --     contents, leave), where R is the most rerolls a shop_joker clause asks
 --     for at that ante. R is made in every shop of the ante: rerolls continue
@@ -183,11 +251,12 @@
 --     after the R rerolls). The ante of a hit is chained when that ante has a
 --     from_tag clause, as for any shop clause.
 --   Chained antes: at an ante with both a from_tag clause and a shop clause,
---   the two policies are one playthrough. The pack-tag blinds are skipped, so
---   the shop after a skipped blind never happens, and everything is drawn on
---   S in the game's order: (A > 1) the shop after the previous Boss, then per
---   blind, Small first, its tag pack at the skip or its shop when it is
---   played: ante_walk with skip set on the blinds whose tag gives a pack.
+--   the two policies are one playthrough. The pack-tag blinds (and taken
+--   tags' blinds) are skipped, so the shop after a skipped blind never
+--   happens, and everything is drawn on S in the game's order: (A > 1) the
+--   shop after the previous Boss, then per blind, Small first, its tag pack
+--   at the skip or its shop when it is played: ante_walk with skip set on the
+--   blinds whose tag gives a pack or is taken.
 --   The order matters: a tag pack and a shop pack of the same kind
 --   share the ante's streams (Tarot'ar1'A and 'soul_Tarot'A for Arcana), so
 --   each changes what the other holds. Nothing is taken from a tag pack; a
@@ -196,8 +265,8 @@
 --   the real game by rig/scenarios/finder_chain.lua.
 --   Elsewhere tag packs and shop packs are separate branches: the tag packs
 --   are drawn on a copy of S taken before the first shop walk, so each
---   clause holds under its own policy. Deck effects queued as events are not in a fresh S (see
---   docs/bh-core.md § sim.state).
+--   clause holds under its own policy. A fresh S applies the deck's queued
+--   events that generation reads (docs/bh-core.md § sim.state).
 --   Groups: every member's needs join the walk (R, open, the antes a joker
 --   member walks) and a from_tag member makes its ante chained, whether or
 --   not the member is reached, so the walk is fixed by f alone and no ante is
@@ -248,6 +317,40 @@ local function known(tbl, key, pred)
 end
 
 local function P(name) return G and G[name] end
+
+-- What voucher `key` requires, and what that requires (any order).
+local function prerequisites(key)
+  local out, seen = {}, {[key] = true}
+  local function add(k)
+    local v = P('P_CENTERS') and G.P_CENTERS[k]
+    local req = type(v) == 'table' and type(v.requires) == 'table' and v.requires or {}
+    for _, r in pairs(req) do
+      if not seen[r] then seen[r] = true; out[#out + 1] = r; add(r) end
+    end
+  end
+  add(key)
+  return out
+end
+M.prerequisites = prerequisites
+
+-- A voucher the walk never buys (Policies: voucher clauses).
+local function rewinds(key)
+  local v = P('P_CENTERS') and G.P_CENTERS[key]
+  return type(v) == 'table' and state.REWINDS[v.name] == true
+end
+
+local function center_name(key)
+  local v = P('P_CENTERS') and G.P_CENTERS[key]
+  return type(v) == 'table' and v.name or tostring(key)
+end
+
+-- A voucher the walk can make show: not one that needs a voucher it never buys.
+function M.voucher_findable(key)
+  for _, r in ipairs(prerequisites(key)) do
+    if rewinds(r) then return false, r end
+  end
+  return true
+end
 
 local FIELDS = {
   tag = {kind = true, ante = true, blind = true, key = true, by = true},
@@ -328,6 +431,11 @@ local function check_clause(c, where, antes, top, any)
   elseif c.kind == 'voucher' then
     if not prefixed(c.key, 'v_') or not known(P('P_CENTERS'), c.key, function(v) return v.set == 'Voucher' end) then
       return where..': unknown voucher '..tostring(c.key)
+    end
+    local findable, needs = M.voucher_findable(c.key)
+    if not findable then
+      return where..': '..center_name(c.key)..' needs '..center_name(needs)..' bought first, and the Finder never buys '
+        ..center_name(needs)..' (its -1 ante is not modelled)'
     end
   elseif c.kind == 'legendary' then
     if c.index ~= 1 and c.index ~= 2 then return where..': index must be 1 or 2' end
@@ -529,6 +637,14 @@ local function soul_at(cards)
   end
 end
 
+-- The blind a tag clause holds on in the ante whose tags are t (Small
+-- first), or nil.
+local function tag_blind(c, t)
+  local blind = c.blind or 'any'
+  if (blind == 'Small' or blind == 'any') and t.small == c.key then return 'Small' end
+  if (blind == 'Big' or blind == 'any') and t.big == c.key then return 'Big' end
+end
+
 -- Per-eval memo: every stream is drawn once and shared by the clauses.
 local Ctx = {}
 Ctx.__index = Ctx
@@ -560,14 +676,70 @@ local function soul_ante(f, S)
   return top[VOUCHER] or top[BOSS] or top[TAG] or S.game.round_resets.ante, legend
 end
 
+-- The positive tag clauses (members included): the tags the player takes.
+local function taker_clauses(f)
+  local out = {}
+  for _, c in ipairs(M.plain_clauses(f)) do
+    if c.kind == 'tag' and not c.exclude then out[#out + 1] = c end
+  end
+  return out
+end
+
+-- Whether f has a positive from_tag clause (members included) at ante a.
+local function has_from_tag(f, a)
+  for _, c in ipairs(M.plain_clauses(f)) do
+    if c.kind == 'soul_in_pack' and c.from_tag and c.ante == a and not c.exclude then return true end
+  end
+  return false
+end
+
+function M.purchase_rules(f)
+  local out = {}
+  for _, c in ipairs(M.plain_clauses(f)) do
+    if c.kind == 'voucher' and not c.exclude then
+      if not rewinds(c.key) then
+        out[#out + 1] = {clause = c, key = c.key, lo = c.by and 1 or c.ante, hi = c.ante, own = true}
+      end
+      for _, r in ipairs(prerequisites(c.key)) do
+        if not rewinds(r) and c.ante > 1 then out[#out + 1] = {clause = c, key = r, lo = 1, hi = c.ante - 1} end
+      end
+    end
+  end
+  return out
+end
+
+-- Where the walk may buy: buy[key][a] = true when key is bought at ante a if
+-- a's shop offers it; at[a] = true when some key is.
+local function purchases_of(f)
+  local buy, at = {}, {}
+  for _, r in ipairs(M.purchase_rules(f)) do
+    buy[r.key] = buy[r.key] or {}
+    for a = r.lo, r.hi do buy[r.key][a], at[a] = true, true end
+  end
+  return buy, at
+end
+
+local function copy_set(t)
+  local out = {}
+  for k, v in pairs(t) do out[k] = v end
+  return out
+end
+
 local function new_ctx(S, f, steps)
   local needs, any_open = shop_needs(f)
   local chained, branch = chained_antes(f, needs)
   local ante, legend = soul_ante(f, S)
+  local buy, buy_at = purchases_of(f)
   return setmetatable({S = S, f = f, tags = {}, vouchers = {}, bosses = {}, boss_upto = 0,
     tag_packs = {}, needs = needs, any_open = any_open, walked = 0, shops = {},
     chained = chained, tag_branch = branch, steps = steps,
-    soul_ante = ante, has_legend = legend}, Ctx)
+    soul_ante = ante, has_legend = legend,
+    takers = taker_clauses(f), taken_at = {}, skips = {}, walk_packs = {},
+    branch1 = branch and chained[1] == nil and has_from_tag(f, 1),
+    -- v_base: the run's own redeemed vouchers (the deck's), before the walk
+    -- buys any; nil when f buys nothing, and S's own then never changes.
+    buy = buy, buy_at = buy_at, bought = {},
+    v_base = next(buy_at) and copy_set(S.game.used_vouchers or {}) or nil}, Ctx)
 end
 
 function Ctx:tag(a)
@@ -583,9 +755,105 @@ function Ctx:boss(a)
   return self.bosses[a]
 end
 
-function Ctx:voucher(a)
-  if not self.vouchers[a] then self.vouchers[a] = predict.voucher(self.S, a) end
-  return self.vouchers[a]
+-- Ante x's voucher, drawn once, and whether the walk buys it (header:
+-- Policies, voucher clauses). Its pool leaves out the purchases below x, so
+-- redeemed draws every lower ante the walk may buy at first.
+function Ctx:voucher(x)
+  local v = self.vouchers[x]
+  if v then return v end
+  v = predict.voucher(self.S, x, self:redeemed(x - 1))
+  self.vouchers[x] = v
+  if self.buy[v] and self.buy[v][x] and self:offered(x) then self.bought[x] = v end
+  return v
+end
+
+-- The vouchers redeemed once ante x's purchase is made: the run's own and the
+-- walk's at antes 1..x. nil when f buys nothing (S's own used_vouchers).
+function Ctx:redeemed(x)
+  local used = self.v_base
+  if not used then return nil end
+  for y = 1, x do
+    if self.buy_at[y] then
+      self:voucher(y)
+      local key = self.bought[y]
+      if key then
+        if used == self.v_base then used = copy_set(used) end
+        used[key] = true
+      end
+    end
+  end
+  return used
+end
+
+-- The voucher the walk buys at ante x, or nil.
+function Ctx:bought_at(x)
+  if self.buy_at[x] then self:voucher(x) end
+  return self.bought[x]
+end
+
+-- Whether ante x's shops offer its voucher. Every ante's do (the shop after
+-- the previous Boss) but ante 1's when both its blinds are skipped: its taken
+-- tags, and the pack tags a from_tag clause there skips (chained, or a
+-- separate branch), as walk_to and first_shop_ante skip them.
+function Ctx:offered(x)
+  if x > 1 then return true end
+  if self.offered1 == nil then
+    local t = self:taken(1) or {}
+    local small, big = t.Small ~= nil, t.Big ~= nil
+    if self.chained[1] or self.branch1 then
+      local tags = self:tag(1)
+      small = small or predict.TAG_PACKS[tags.small] ~= nil
+      big = big or predict.TAG_PACKS[tags.big] ~= nil
+    end
+    self.offered1 = not (small and big)
+  end
+  return self.offered1
+end
+
+-- The blinds of ante x a positive tag clause takes (header: Policies, tag
+-- clauses): {Small = key, Big = key}, or false. A plain clause takes its
+-- blind at its ante when it holds there (Small first for blind 'any'); a by
+-- clause takes the first ante and blind that holds, as its eval reports.
+-- 'Tag'..a is a per-ante stream, so drawing a tag here moves nothing else.
+function Ctx:taken(x)
+  if self.taken_at[x] ~= nil then return self.taken_at[x] end
+  local out = false
+  for _, c in ipairs(self.takers) do
+    local at, b
+    if c.by then
+      for y = 1, math.min(x, c.ante) do
+        b = tag_blind(c, self:tag(y))
+        if b then at = y; break end
+      end
+    elseif c.ante == x then
+      at, b = x, tag_blind(c, self:tag(x))
+    end
+    if at == x and b then
+      out = out or {}
+      out[b] = c.key
+    end
+  end
+  self.taken_at[x] = out
+  return out
+end
+
+-- The ante of the run's first shop, which gets the forced first Buffoon: ante
+-- 1 unless both its blinds are skipped, then ante 2 (the shop after its Boss).
+-- A walked ante 1 says so by its shops. An unwalked one skips its taken tags
+-- and, with a from_tag clause there (a separate branch), its pack-tag blinds;
+-- when that is both, details.skips[1] records it for the route to replay.
+function Ctx:first_shop_ante()
+  if self.shops[1] then return #self.shops[1] == 0 and 2 or 1 end
+  local t, tags = self:taken(1) or {}, self:tag(1)
+  local function skipped(blind, tag)
+    return t[blind] or (self.branch1 and predict.TAG_PACKS[tag] and tag) or nil
+  end
+  local sk = {Small = skipped('Small', tags.small), Big = skipped('Big', tags.big)}
+  if sk.Small and sk.Big then
+    self.skips[1] = sk
+    return 2
+  end
+  return 1
 end
 
 -- Whether any step after step k (a clause or group member, in eval order)
@@ -653,6 +921,11 @@ function Ctx:tag_packs_at(a)
   -- none. For a > 1 the walk draws the Boss's shop first (pack keys only on
   -- 'shop_pack'A, which no pack's contents read), so the packs are unchanged.
   if self.tag_S == self.S then self:before_walk() end
+  -- What a purchase changes that these packs read is used_vouchers (Omen
+  -- Globe): the vouchers bought below a, and a's own, bought in the Boss's
+  -- shop before the skips.
+  local used = self:redeemed(a > 1 and a or 0)
+  if used then self.tag_S.game.used_vouchers = copy_set(used) end
   local walk = predict.ante_walk(self.tag_S, a, {skip = {Small = true, Big = true},
     cards = false, open = false, tags = self:tag(a)})
   self.tag_packs[a] = tag_packs_of(walk)
@@ -660,9 +933,11 @@ function Ctx:tag_packs_at(a)
 end
 
 -- Walks the shops of every needed ante up to a, in ascending order, one
--- predict.ante_walk per ante under the plan policy (needs n). A chained ante
--- skips the blinds whose tag gives a pack. Each shop gets rows = {the row on
--- entering, the row after reroll 1, ...}.
+-- predict.ante_walk per ante under the plan policy (needs n). Every ante
+-- skips its taken tags' blinds; a chained ante also the blinds whose tag
+-- gives a pack. An ante's voucher purchase is made in its first shop, or
+-- applied to S when the ante is not walked. Each shop gets rows = {the row
+-- on entering (after a purchase there), the row after reroll 1, ...}.
 function Ctx:walk_to(a)
   local S = self.S
   if a > self.walked then
@@ -673,26 +948,39 @@ function Ctx:walk_to(a)
   end
   for x = self.walked + 1, a do
     local n = self.needs[x]
+    local bought = self:bought_at(x)
+    if not n and bought then
+      -- An ante no clause needs still has its shops: the purchase holds on.
+      state.redeem(S, bought)
+    end
     if n then
       -- The run's forced first Buffoon (it draws nothing, so only which shop it
-      -- lands in matters): an ante no clause needs was played by the no-skip
-      -- policy, so its shops already took it. When ante 1 was walked with both
-      -- blinds skipped it had no shop, and the Buffoon belongs to ante 2's Boss
-      -- shop, which ante_walk places itself.
-      if x > 1 and not S.game.first_shop_buffoon and self.shops[1] == nil then predict.packs(S, 1, 1) end
+      -- lands in matters) belongs to the run's first shop: ante 1's, or ante
+      -- 2's Boss shop when both ante-1 blinds are skipped. A walked ante places
+      -- it itself (ante_walk); one no clause needs is spent here, since an
+      -- unwalked ante still has its shops (only taken tags skip there).
+      local first = self:first_shop_ante()
+      if x > first and not S.game.first_shop_buffoon and self.shops[first] == nil then predict.packs(S, 1, 1) end
       local tags = self:tag(x)
-      local skip = {}
+      local taken = self:taken(x) or {}
+      local skip = {Small = taken.Small ~= nil, Big = taken.Big ~= nil}
       if self.chained[x] then
-        skip.Small = predict.TAG_PACKS[tags.small] ~= nil
-        skip.Big = predict.TAG_PACKS[tags.big] ~= nil
+        skip.Small = skip.Small or predict.TAG_PACKS[tags.small] ~= nil
+        skip.Big = skip.Big or predict.TAG_PACKS[tags.big] ~= nil
       end
+      -- Every pack a skipped blind's tag gives opens at the skip, whatever
+      -- the reason for the skip (Meteor, Standard and Buffoon included).
       local walk = predict.ante_walk(S, x, {skip = skip, rerolls = n.rerolls, open = n.open,
-        cards = n.rows, tags = tags})
+        cards = n.rows, tags = tags, pack_tags = predict.ALL_TAG_PACKS, voucher = bought})
       for _, shop in ipairs(walk.shops) do
         shop.rows = {shop.cards}
         for r, row in ipairs(shop.rerolls) do shop.rows[r + 1] = row.cards end
       end
-      if self.chained[x] then self.tag_packs[x] = tag_packs_of(walk) end
+      if skip.Small or skip.Big then
+        self.skips[x] = {Small = skip.Small and tags.small or nil, Big = skip.Big and tags.big or nil}
+      end
+      self.walk_packs[x] = tag_packs_of(walk)
+      if self.chained[x] then self.tag_packs[x] = self.walk_packs[x] end
       self.shops[x] = walk.shops
     end
     self.walked = x
@@ -720,14 +1008,6 @@ local function matches(c, card)
 end
 
 local EVAL = {}
-
--- The blind a tag clause holds on in the ante whose tags are t (Small
--- first), or nil.
-local function tag_blind(c, t)
-  local blind = c.blind or 'any'
-  if (blind == 'Small' or blind == 'any') and t.small == c.key then return 'Small' end
-  if (blind == 'Big' or blind == 'any') and t.big == c.key then return 'Big' end
-end
 
 function EVAL.tag(ctx, c)
   if c.by then
@@ -758,12 +1038,12 @@ function EVAL.voucher(ctx, c)
   if c.by then
     for a = 1, c.ante do
       local v = ctx:voucher(a)
-      if v == c.key then return true, {ante = a, key = v} end
+      if v == c.key and ctx:offered(a) then return true, {ante = a, key = v} end
     end
     return false, {}
   end
   local v = ctx:voucher(c.ante)
-  return v == c.key, {key = v}
+  return v == c.key and ctx:offered(c.ante), {key = v}
 end
 
 function EVAL.legendary(ctx, c, k)
@@ -890,12 +1170,15 @@ function M.eval(S, f)
     if any and hit then result = true; break end
     if not any and not hit then result = false; break end
   end
-  for a in pairs(ctx.chained) do
-    if ctx.tag_packs[a] then
+  for a, packs in pairs(ctx.walk_packs) do
+    if ctx.chained[a] or #packs > 0 then
       details.tag_packs = details.tag_packs or {}
-      details.tag_packs[a] = ctx.tag_packs[a]
+      details.tag_packs[a] = packs
     end
   end
+  if next(ctx.skips) then details.skips = ctx.skips end
+  if next(ctx.bought) then details.bought = ctx.bought end
+  details.walked = ctx.walked
   return result, details
 end
 

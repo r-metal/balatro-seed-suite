@@ -125,9 +125,9 @@ Closes research picks [25] (the daily seed's runs in the Journal) and T-372 (pic
 ## SeedFinder (T-111, T-112, T-113): new mod `mods/SeedFinder`, modules `seedfinder.*`
 
 - **Filter model (T-111):** `{name, stake = 1, deck = 'b_red', all_unlocked = false, antes = N, clauses = {{kind, ante?, ...}}, mode = 'all'|'any'}`. Clause kinds:
-  - `tag {ante, blind = 'Small'|'Big'|'any', key}`
+  - `tag {ante, blind = 'Small'|'Big'|'any', key}` *(Amended 2026-09-29: a tag clause is taken. Where it holds, the player skips that blind for the tag, so the walk and the route skip it too: its shop never happens, and a tag that gives a pack opens it at the skip. 0.4.0 played the blind, so "Investment Tag on the Small Blind" beside a Charm-pack Soul could report a Soul that only the Small Blind's shop put there.)*
   - `boss {ante, key}`
-  - `voucher {ante, key}`
+  - `voucher {ante, key}` *(Amended 2026-10-25, GitHub issue #1: a voucher clause is bought. Where it holds, the player buys the voucher in that ante's first shop, and a tier-2 voucher's clause also buys its tier-1 (`requires`) at the first ante below the clause's that offers it. Each ante's voucher is drawn with the purchases below it redeemed, and the walk applies what a purchase changes to every later shop (Overstock's slot, the Merchant/Tycoon, Hone/Glow Up and Magic Trick/Illusion rates, Omen Globe). Ante 1 offers no voucher when both its blinds are skipped. Hieroglyph and Petroglyph are never bought (their -1 ante is not modelled), so a Petroglyph clause is refused. 0.4.0 bought nothing, so no tier-2 voucher (Overstock Plus, Liquidation, Glow Up, Reroll Glut, ...) could ever be found. Checked against the real game by `rig/scenarios/golden_vouchers.lua` and `finder_voucher.lua`.)*
   - `legendary {index = 1|2, key?}`
   - `soul_in_pack {ante, pack = 'arcana'|'spectral', from_tag = bool}`. When one ante has a `from_tag` clause and any shop clause, the two are one playthrough: the Charm/Ethereal blinds are skipped (so their shops never happen) and tag packs and shop packs are drawn in play order on the same state, because a tag pack and a shop pack of one kind share the ante's streams. Other antes keep tag packs and shops as separate branches.
   - `shop_joker {ante, key, rerolls = 0..}`

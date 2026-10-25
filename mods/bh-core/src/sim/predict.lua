@@ -6,7 +6,13 @@
 --   Stable streams
 --   predict.tags(S, ante)       -> {small = key, big = key}
 --   predict.boss(S, ante)       -> blind key
---   predict.voucher(S, ante)    -> voucher key
+--   predict.voucher(S, ante, used) -> voucher key. used (optional, a set of
+--                                  voucher keys) stands in for
+--                                  S.game.used_vouchers during the draw: the
+--                                  vouchers redeemed by then, which the pool
+--                                  leaves out and whose tier-2 vouchers it
+--                                  admits (`requires`). S's own table is
+--                                  untouched.
 --   predict.legendaries(S, n)   -> {{key = 'j_...', edition = 'foil'|'holo'|
 --                                  'polychrome'|'negative'|nil}, ...}, n of them:
 --                                  the jokers the next n Souls used would make.
@@ -129,15 +135,17 @@
 --     reroll, purchase, skip, held joker/consumable, voucher, tag and rate
 --     change moves them). A tutorial forced_shop replaces the first shop cards
 --     (UI_definitions.lua:743-751): not modelled, labelled by the conditional.
---   Deck effects applied by events (Magic, Zodiac, Nebula...: rates, slots,
---   vouchers) are not in a state.fresh() S; see docs/bh-core.md § sim.state.
+--   Deck effects applied by events (Zodiac's rates and slots, Magic's and
+--   Ghost's starting cards in used_jokers) are applied by state.fresh() from
+--   the deck's config; see docs/bh-core.md § sim.state.
 --
 -- Ante walk: predict.ante_walk(S, a, {skip = {Small = bool, Big = bool},
 --   rerolls = R (0), open = bool (true), cards = bool (true),
---   tags = {small, big} or nil, pack_tags = set of tag keys (TAG_PACKS)}) ->
+--   tags = {small, big} or nil, pack_tags = set of tag keys (TAG_PACKS),
+--   voucher = key or nil}) ->
 --   {tags = {small, big},
 --    shops = {{after = 'Boss'|'Small'|'Big', cards, rerolls = {{cards}...},
---              packs, contents = {[slot] = {cards...}}}...},
+--              packs, contents = {[slot] = {cards...}}, voucher = key or nil}...},
 --    tag_packs = {{blind, tag, pack, cards}...}}
 --   One ante as it is played, drawing on S in the game's order: (a > 1) the
 --   shop after the Boss of ante a-1 (it comes after ease_ante, so it draws
@@ -167,6 +175,14 @@
 --   draws; the pack streams do not depend on them) and requires open = false,
 --   since pack contents exclude the row's cards. Shop pack j carries index,
 --   its position among the ante's shop packs in this walk.
+--   policy.voucher: a voucher bought in the ante's first shop (the Boss's for
+--   a > 1, else the first blind played) right after entering. Its row and
+--   packs are made, then state.redeem(S, key), then the R rerolls and the
+--   packs. A shop slot it adds (Overstock, Overstock Plus: change_shop_size,
+--   common_events.lua:1097-1118) is filled at once, continuing the row's
+--   streams, so that shop's cards are its row after the purchase (cards =
+--   false draws no row and fills none). That shop carries voucher = key. An
+--   ante with no shop (a = 1 with both blinds skipped) raises.
 --   Tags: policy.tags when the caller has drawn them already; otherwise the
 --   walk draws tags(S, a) itself ('Tag'..a is a per-ante stream nothing else
 --   draws, so its place in the order is free; it must not be drawn twice).
@@ -226,11 +242,18 @@ function M.boss(S, ante)
   end)
 end
 
-function M.voucher(S, ante)
+function M.voucher(S, ante, used)
   check(S, ante, 'voucher')
+  assert(used == nil or type(used) == 'table', 'predict.voucher: used must be a set of voucher keys')
   return run(S, function()
     at_ante(ante)
-    return get_next_voucher_key()
+    if not used then return get_next_voucher_key() end
+    local own = G.GAME.used_vouchers
+    G.GAME.used_vouchers = used
+    local ok, key = pcall(get_next_voucher_key)
+    G.GAME.used_vouchers = own
+    if not ok then error(key, 0) end
+    return key
   end)
 end
 
@@ -483,10 +506,26 @@ M.ALL_TAG_PACKS = {
   tag_buffoon = 'p_buffoon_mega_1',     -- tag.lua:269-282
 }
 
+-- The voucher bought in the open shop: its effects on S, then the slots it
+-- adds filled at once (change_shop_size: joker_max - #row new cards, appended).
+local function redeem_in_shop(S, a, key, cards)
+  state.redeem(S, key)
+  if not cards then return end
+  local added = run(S, function()
+    at_ante(a)
+    return fill_shop(joker_max() - #shop_keys())
+  end)
+  for _, c in ipairs(added) do cards[#cards + 1] = c end
+end
+
 local function walk_shop(S, a, after, pol, walk)
   local shop = {after = after, rerolls = {}, contents = {}}
   if pol.cards then shop.cards = M.shop(S, a) end
   shop.packs = M.packs(S, a, 2)
+  if walk.voucher then
+    shop.voucher, walk.voucher = walk.voucher, nil
+    redeem_in_shop(S, a, shop.voucher, shop.cards)
+  end
   if pol.cards then
     for r = 1, pol.rerolls do shop.rerolls[r] = {cards = M.reroll(S, a)} end
   end
@@ -522,7 +561,13 @@ function M.ante_walk(S, a, policy)
     tags = M.tags(S, a)
   end
 
-  local walk = {tags = {small = tags.small, big = tags.big}, shops = {}, tag_packs = {}, pack_i = 0}
+  local voucher = policy.voucher
+  assert(voucher == nil or (type(voucher) == 'string' and G.P_CENTERS[voucher] and G.P_CENTERS[voucher].set == 'Voucher'),
+    'predict.ante_walk: voucher must be a voucher key')
+  assert(voucher == nil or a > 1 or not (skip.Small and skip.Big),
+    'predict.ante_walk: ante 1 has no shop to buy '..tostring(voucher)..' in (both blinds skipped)')
+
+  local walk = {tags = {small = tags.small, big = tags.big}, shops = {}, tag_packs = {}, pack_i = 0, voucher = voucher}
   if a > 1 then walk.shops[1] = walk_shop(S, a, 'Boss', pol, walk) end
   for _, blind in ipairs{'Small', 'Big'} do
     if skip[blind] then
@@ -536,7 +581,7 @@ function M.ante_walk(S, a, policy)
       walk.shops[#walk.shops + 1] = walk_shop(S, a, blind, pol, walk)
     end
   end
-  walk.pack_i = nil
+  walk.pack_i, walk.voucher = nil, nil
   return walk
 end
 

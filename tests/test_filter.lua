@@ -46,9 +46,9 @@ local function world(o)
     center('c_black_hole', {name = 'Black Hole', set = 'Spectral', order = 18, consumeable = true, hidden = true}),
     center('c_base', {name = 'Default Base', set = 'Default', order = 1}),
     center('m_bonus', {name = 'Bonus', set = 'Enhanced', order = 2}),
-    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true}),
-    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true}),
-    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true}),
+    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true, cost = 10}),
+    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true, cost = 10, config = {extra = 1}}),
+    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true, cost = 10, config = {extra = 2}}),
     center('b_red', {name = 'Red Deck', set = 'Back', order = 1}),
   }
   local boosters = {
@@ -1262,7 +1262,9 @@ end)
 
 H.test('group: a chained ante is walked for a from_tag member never reached; details.tag_packs records it', function()
   local filter, predict, state = mods()
-  local f = F({grp({kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'},
+  -- The legendary member (any key) always holds and runs before the from_tag
+  -- one; a tag member would be taken, skipping the Big Blind as well.
+  local f = F({grp({kind = 'legendary', index = 1},
       {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}),
     {kind = 'pack', ante = 1, key_prefix = 'p_'}})
   local found = 0
@@ -1429,4 +1431,136 @@ H.test('group: odds.sample counts agree with full evals for a legendary edition 
   H.eq(counts.clauses[1], #seeds, 'the group always holds')
   H.eq(counts.full, counts.clauses[2], 'full = the legendary alone')
   H.ok(counts.clauses[2] > 0 and counts.clauses[2] < #seeds, 'the legendary both holds and misses: '..counts.clauses[2])
+end)
+
+------------------------------------------------------------------------------
+-- Taken tags (header: Policies, tag clauses): the player skips a positive tag
+-- clause's blind to take its tag, and the walk skips it too.
+
+-- The first seeds (prefix..1..) whose ante-1 tags pass ok(tags).
+local function seeds_where(prefix, n, ok, tags)
+  local _, predict, state = mods()
+  local out = {}
+  for i = 1, 400 do
+    local S = world{seed = prefix..i, tags = tags}
+    if ok(predict.tags(state.copy(S), 1)) then out[#out + 1] = S end
+    if #out >= n then break end
+  end
+  return out
+end
+
+H.test('taken tag: a chained ante skips the tag\'s blind too, so no shop precedes the Charm pack', function()
+  local filter, predict, state = mods()
+  -- The reported filter's shape: a Small tag, the Charm Soul, a joker by ante 2
+  -- (it chains ante 1). 0.4.0 played the Small Blind and opened its shop's
+  -- packs before the Charm pack; the player who takes the tag never sees them.
+  local f = F({{kind = 'tag', ante = 1, blind = 'Small', key = 'tag_juggle'},
+    {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true},
+    {kind = 'joker', ante = 2, key = 'j_blueprint'}})
+  local seeds = seeds_where('TAKE', 6, function(t) return t.small == 'tag_juggle' and t.big == 'tag_charm' end,
+    {'tag_charm', 'tag_juggle'})
+  H.ok(#seeds >= 3, 'Juggle Small / Charm Big seeds: '..#seeds)
+  local moved = 0
+  for k, S in ipairs(seeds) do
+    local _, d = filter.eval(state.copy(S), f)
+    H.eq(d.results[1].ok, true)
+    H.eq(d.skips[1].Small, 'tag_juggle', 'seed '..k); H.eq(d.skips[1].Big, 'tag_charm', 'seed '..k)
+    -- By hand: both blinds skipped, the Charm pack on untouched streams.
+    local T = state.copy(S)
+    local w = predict.ante_walk(T, 1, {tags = predict.tags(T, 1), skip = {Small = true, Big = true},
+      cards = false, open = false})
+    local packs = d.results[2].packs
+    H.eq(#packs, 1); H.eq(packs[1].blind, 'Big')
+    for i, c in ipairs(w.tag_packs[1].cards) do H.eq(packs[1].cards[i], c.key, 'seed '..k..' card '..i) end
+    -- 0.4.0's walk (the Small's shop, both its packs opened) moves the pack
+    -- whenever that shop held an Arcana pack.
+    local O = state.copy(S)
+    local old = predict.ante_walk(O, 1, {tags = predict.tags(O, 1), skip = {Big = true}, open = true})
+    local same = true
+    for i, c in ipairs(old.tag_packs[1].cards) do same = same and packs[1].cards[i] == c.key end
+    if not same then moved = moved + 1 end
+    -- Ante 1 has no shop, so ante 2's Boss shop holds the forced Buffoon.
+    local j = d.results[3]
+    if j and j.ok then H.ok(j.ante == 2, 'seed '..k..': no ante-1 shop to find the joker in') end
+  end
+  H.ok(moved > 0, 'the Small shop moved the Charm pack on some seed')
+end)
+
+H.test('taken tag: both ante-1 blinds taken move the forced Buffoon to ante 2\'s Boss shop', function()
+  local filter, predict, state = mods()
+  for k, S in ipairs(seeds_where('TAKEBUF', 3, function() return true end)) do
+    local t = predict.tags(state.copy(S), 1)
+    local f = F({{kind = 'tag', ante = 1, blind = 'Small', key = t.small},
+      {kind = 'tag', ante = 1, blind = 'Big', key = t.big},
+      {kind = 'pack', ante = 2, key_prefix = 'p_'}})
+    local ok, d = filter.eval(state.copy(S), f)
+    H.eq(ok, true, 'seed '..k)
+    H.eq(d.results[3].shop, 1); H.eq(d.results[3].slot, 1)
+    H.eq(d.results[3].pack, 'p_buffoon_normal_1', 'seed '..k..': the forced Buffoon, in ante 2 shop 1 slot 1')
+    -- By hand: ante 1 has no shop, ante 2's walk places the Buffoon itself.
+    local T = state.copy(S)
+    predict.ante_walk(T, 1, {skip = {Small = true, Big = true}, cards = false, open = false,
+      pack_tags = predict.ALL_TAG_PACKS})
+    local w = predict.ante_walk(T, 2, {cards = false, open = false})
+    H.eq(w.shops[1].packs[1].forced, true)
+    -- One tag taken: ante 1 keeps a shop, which takes the Buffoon.
+    local _, d1 = filter.eval(state.copy(S), F({f.clauses[1], f.clauses[3]}))
+    local U = state.copy(S)
+    predict.packs(U, 1, 1)
+    local w1 = predict.ante_walk(U, 2, {cards = false, open = false})
+    H.eq(d1.results[2].pack, w1.shops[1].packs[1].key, 'seed '..k..': ante 2 draws its first pack')
+    H.eq(d1.skips, nil, 'ante 1 is not walked, so no skips are recorded')
+  end
+end)
+
+H.test('taken tag: a taken pack tag opens its pack in the walk, before the next shop\'s packs', function()
+  local filter, predict, state = mods()
+  local seeds = seeds_where('TAKEPACK', 3, function(t) return t.small == 'tag_charm' and t.big ~= 'tag_charm' end,
+    {'tag_charm', 'tag_juggle'})
+  H.ok(#seeds > 0, 'a Charm Small seed')
+  for k, S in ipairs(seeds) do
+    local f = F({{kind = 'tag', ante = 1, blind = 'Small', key = 'tag_charm'},
+      {kind = 'soul_in_pack', ante = 1, pack = 'arcana'}})
+    local _, d = filter.eval(state.copy(S), f)
+    H.eq(d.skips[1].Small, 'tag_charm'); H.eq(d.skips[1].Big, nil)
+    local T = state.copy(S)
+    local w = predict.ante_walk(T, 1, {tags = predict.tags(T, 1), skip = {Small = true}, open = true,
+      pack_tags = predict.ALL_TAG_PACKS})
+    local tp = d.tag_packs and d.tag_packs[1]
+    H.ok(tp, 'seed '..k..': the walk\'s tag pack is recorded (the ante is not chained)')
+    H.eq(tp[1].pack, 'p_arcana_mega_1')
+    for i, c in ipairs(w.tag_packs[1].cards) do H.eq(tp[1].cards[i], c.key, 'seed '..k..' card '..i) end
+    H.eq(#w.shops, 1); H.eq(w.shops[1].after, 'Big')
+    local r = d.results[2]
+    if r.ok then H.eq(w.shops[1].contents[r.slot][r.index].key, 'c_soul', 'seed '..k) end
+  end
+end)
+
+H.test('taken tag: an excluded tag clause takes nothing; a by tag only its first ante', function()
+  local filter, predict, state = mods()
+  local S = world{seed = 'TAKENOT'}
+  local t = predict.tags(state.copy(S), 1)
+  local miss = (t.small == 'tag_juggle' or t.big == 'tag_juggle') and 'tag_economy' or 'tag_juggle'
+  if t.small == miss or t.big == miss then miss = 'tag_uncommon' end
+  local _, d = filter.eval(state.copy(S), F({{kind = 'tag', ante = 1, blind = 'Small', key = miss, exclude = true},
+    {kind = 'pack', ante = 1, key_prefix = 'p_'}}))
+  H.eq(d.results[1].ok, true); H.eq(d.skips, nil, 'a must-not takes no tag')
+  local _, dp = filter.eval(state.copy(S), F({{kind = 'tag', ante = 1, blind = 'Small', key = t.small},
+    {kind = 'pack', ante = 1, key_prefix = 'p_'}}))
+  H.eq(dp.skips[1].Small, t.small, 'the positive clause takes it')
+  -- by: a tag found at ante 1 is taken there; ante 2's copy stays a shop.
+  local found = 0
+  for i = 1, 400 do
+    local W = world{seed = 'TAKEBY'..i, tags = {'tag_juggle', 'tag_economy'}}
+    local t1, t2 = predict.tags(state.copy(W), 1), predict.tags(state.copy(W), 2)
+    if t1.small == 'tag_juggle' and t2.small == 'tag_juggle' then
+      local ok, db = filter.eval(state.copy(W), F({{kind = 'tag', ante = 2, blind = 'Small', key = 'tag_juggle', by = true},
+        {kind = 'pack', ante = 2, key_prefix = 'p_'}}))
+      H.eq(ok, true); H.eq(db.results[1].ante, 1)
+      H.eq(db.skips, nil, 'TAKEBY'..i..': ante 2 walked with its Small played')
+      found = found + 1
+      if found >= 2 then break end
+    end
+  end
+  H.ok(found > 0, 'a Juggle Small at antes 1 and 2')
 end)

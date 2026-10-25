@@ -50,9 +50,9 @@ local function world(o)
     center('c_black_hole', {name = 'Black Hole', set = 'Spectral', order = 18, consumeable = true, hidden = true}),
     center('c_base', {name = 'Default Base', set = 'Default', order = 1}),
     center('m_bonus', {name = 'Bonus', set = 'Enhanced', order = 2}),
-    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true}),
-    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true}),
-    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true}),
+    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true, cost = 10}),
+    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true, cost = 10, config = {extra = 1}}),
+    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true, cost = 10, config = {extra = 2}}),
     center('b_red', {name = 'Red Deck', set = 'Back', order = 1}),
   }
   local boosters = {
@@ -412,7 +412,9 @@ H.test('an excluded clause keeps its class: it runs in cost order and ends an al
     log, ok, d = streams(function()
       return filter.eval(at(seed), F({ex(SJ), {kind = 'voucher', ante = 1, key = v1}, ex({kind = 'tag', ante = 1, key = miss})}))
     end)
-    local _, sj = filter.eval(at(seed), F({SJ}))
+    -- The positive form on the same walk: the voucher clause is bought in the
+    -- ante-1 shop the shop_joker reads (Hone moves its editions).
+    local _, sj = filter.eval(at(seed), F({SJ, {kind = 'voucher', ante = 1, key = v1}}))
     H.eq(ok, not sj.results[1].ok, seed); H.eq(d.checked, 3, seed)
     deep_eq(d.results[3], {ok = true}, seed..' tag')
     H.eq(d.results[2].ok, true, seed)

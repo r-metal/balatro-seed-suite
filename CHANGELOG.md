@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Seed Finder hits you can actually play.
+
+- **Fix: upgraded vouchers can be found (#1).** Overstock Plus, Liquidation, Glow Up, Reroll Glut and the other tier-2 vouchers only show up once you've bought their base voucher, and the Finder assumed you never bought anything, so no search could find them. A voucher clause now means you buy that voucher, and a tier-2 clause has you buy its base voucher the first time a shop offers it. Each ante's voucher, and every shop after a purchase, is predicted as the game makes it (Overstock's extra slot, the Merchant, Tycoon, Hone and Magic Trick rates, Omen Globe), and the Route says where to buy: "Shop after the Small Blind: buy the Overstock voucher (Overstock Plus needs it)." Tier-2 vouchers must be unlocked on your profile, or turn on All unlocked. Petroglyph can't be searched for yet: it needs Hieroglyph, and the Finder doesn't follow Hieroglyph's -1 ante.
+- **Fix: a skip-tag clause now means you skip for the tag.** The Finder used to assume you *played* a blind whose tag a clause asked for, and it could count that blind's shop toward the hit. With "Investment Tag on the Small Blind" and "the Soul in the Charm pack", a seed could be listed whose Soul only appeared after the Small Blind's shop opened an Arcana pack. Skip the Small for the Investment Tag and the Charm pack held no Soul. Now every tag a filter asks for is taken: the search and the Route skip that blind, a tag that gives a pack opens it, and the Route says so ("Skip the Small Blind (Investment Tag).").
+- **Fix: shops on the Zodiac Deck.** The Finder predicted 2-card shops at normal rates on Zodiac, whose starting vouchers make them 3 cards with more Tarot and Planet cards. Shop and "by ante" clauses on Zodiac could miss real hits or report false ones.
+- **Fix: the Magic and Ghost decks' starting cards.** The Fools you start with on Magic, and the Hex on Ghost, can't show up in packs or shops while you hold them. The Finder could predict one there anyway.
+- Fix: a Charm Tag on both ante-1 blinds moves the run's free first Buffoon Pack to ante 2, and the Finder now follows it there.
+- Under the hood: the real-game shop suite covers the Zodiac, Magic and Ghost decks, and `finder_take` plays a taken-tag route through to its Soul and Baron. `golden_vouchers` buys every voucher on offer on 10 seeds and checks 60 shops against the prediction, and `finder_voucher` plays a tier-2 route through to its Overstock Plus.
+
 ## 0.4.0 — 2026-09-28
 
 Alternatives and must-nots in filters, a daily seed, profile backups, and much deeper stats.

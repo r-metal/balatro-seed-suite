@@ -82,15 +82,16 @@ Unzip it so that you get `Mods/BalatroSeedSuite/lovely/`. Watch for an extra lev
 
 - **Filters** combine clauses: skip tags, the boss, vouchers, the Soul's legendary, a Soul in a Charm or Ethereal pack,
   shop jokers, a joker **by ante N** (shops and Buffoon packs, with a reroll budget), packs, and editions. Vouchers,
-  tags and bosses can be "by ante N" too.
+  tags and bosses can be "by ante N" too. A voucher you ask for is one you buy, so upgraded vouchers such as
+  Overstock Plus or Glow Up are found too: the route buys the base voucher first.
 - **and / or / not:** join clause rows with **or** for alternatives ("Telescope *or* Blueprint by ante 3"), and mark a
   row **not** for something that must not happen ("no The Hook by ante 2"). From Black Stake, ask for a **clean** joker
   (no sticker).
 - **Today:** one daily seed and deck for everyone, at White Stake. Play it blind (the Oracle stays locked) or routed.
 - Name a filter yourself, and **Save as** keeps a copy to tweak.
 - **Odds** before you search: how rare a hit is, how long the search should take, and which clause is the bottleneck.
-- **Hits are ranked by what they cost to deliver.** **Route** lists the exact plays: which blind to skip, which pack
-  to open, which card is the Soul, and when to use it.
+- **Hits are ranked by what they cost to deliver.** **Route** lists the exact plays: which blind to skip, which
+  voucher to buy, which pack to open, which card is the Soul, and when to use it.
 - **Play** starts the hit as an unseeded run, so it counts for unlocks, stats and high scores. **Save as hunt** keeps
   it in Save Slots.
 

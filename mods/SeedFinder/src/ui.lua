@@ -25,7 +25,8 @@
 --                  above the deck's best win (all of them on an all-unlocked
 --                  profile). Then the clause list (at most MAX_CLAUSES rows: connector,
 --                  kind, ante, an extra field, key, remove) and "Add clause". Keys come
---                  from the G.P_* pools with localized names (jokers sorted by name). The extra field is
+--                  from the G.P_* pools with localized names (jokers sorted by name; no
+--                  voucher validate refuses, i.e. Petroglyph). The extra field is
 --                  the blind for a tag (Any blind / Small / Big, each also "by ante":
 --                  "Small, by ante" sets by = true, T-313a), At ante / By ante (by)
 --                  for a Voucher and a Boss (T-375: the Boss of some ante 1..N), the
@@ -419,7 +420,10 @@ local function key_pool(kind)
     end
     for _, b in ipairs(by_order(list)) do add(b.key, name_of('Blind', b.key)) end
   elseif kind == 'voucher' then
-    for _, v in ipairs(G.P_CENTER_POOLS.Voucher) do add(v.key, name_of('Voucher', v.key)) end
+    -- Not one the walk can never make show (Petroglyph: filter.voucher_findable).
+    for _, v in ipairs(G.P_CENTER_POOLS.Voucher) do
+      if filter.voucher_findable(v.key) then add(v.key, name_of('Voucher', v.key)) end
+    end
   elseif kind == 'legendary' then
     add(false, 'Any legendary')
     local list = {}

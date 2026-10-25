@@ -44,9 +44,9 @@ local function world(o)
     center('c_black_hole', {name = 'Black Hole', set = 'Spectral', order = 18, consumeable = true, hidden = true}),
     center('c_base', {name = 'Default Base', set = 'Default', order = 1}),
     center('m_bonus', {name = 'Bonus', set = 'Enhanced', order = 2}),
-    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true}),
-    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true}),
-    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true}),
+    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true, cost = 10}),
+    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true, cost = 10, config = {extra = 1}}),
+    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true, cost = 10, config = {extra = 2}}),
     center('b_red', {name = 'Red Deck', set = 'Back', order = 1}),
   }
   local boosters = {
@@ -126,19 +126,27 @@ end
 -- Plays r's steps on T through predict, in order, and checks what each names.
 -- Mirrors filter.lua's walk: a shop draws its row and its 2 packs on entry,
 -- rerolls, opens packs in slot order, and releases its row on leaving; the
--- run's forced first Buffoon is spent before the first shop past ante 1.
+-- run's forced first Buffoon is spent before the first shop past the run's
+-- first shop's ante (ante 2 when the route skips both ante-1 blinds).
 local function replay(predict, T, r)
   local shop -- {ante, packs}
   local function leave()
     if shop then predict.leave_shop(T); shop = nil end
   end
   local souls = 0
+  -- The run's first shop takes the forced Buffoon: ante 1's, unless the route
+  -- skips both ante-1 blinds (then the shop after its Boss, ante 2's first).
+  local skipped1 = 0
+  for _, st in ipairs(r.steps) do
+    if st.action == 'skip' and st.ante == 1 then skipped1 = skipped1 + 1 end
+  end
+  local first = skipped1 == 2 and 2 or 1
   for i, st in ipairs(r.steps) do
     local where = 'step '..i..' ('..st.text..')'
     if st.action == 'play' then
       leave()
       local a = st.when == 'Boss' and st.ante + 1 or st.ante
-      if a > 1 and not T.game.first_shop_buffoon then predict.packs(T, 1, 1) end
+      if a > first and not T.game.first_shop_buffoon then predict.packs(T, 1, 1) end
       predict.shop(T, a)
       shop = {ante = a, packs = predict.packs(T, a, 2)}
     elseif st.action == 'skip' then
@@ -289,13 +297,15 @@ H.test('any mode routes only the clause that hit', function()
   local tags = predict.tags(state.copy(S), 1)
   local miss = tags.small == 'tag_juggle' and 'tag_economy' or 'tag_juggle'
   if tags.big == miss then miss = 'tag_uncommon' end
-  -- A tag hit: nothing to do, the ante still counts.
+  -- A tag hit: its skip only (the tag is taken), and the ante counts.
+  local small3 = predict.tags(state.copy(S), 3).small
   local f1 = F({{kind = 'shop_joker', ante = 1, key = 'j_joker', rerolls = 2},
-    {kind = 'tag', ante = 3, blind = 'Small', key = predict.tags(state.copy(S), 3).small}}, {mode = 'any'})
+    {kind = 'tag', ante = 3, blind = 'Small', key = small3}}, {mode = 'any'})
   local ok1, d1 = filter.eval(state.copy(S), f1)
   H.eq(ok1, true)
   local r1 = assert(R.build(f1, d1))
-  H.eq(#r1.steps, 0); H.eq(r1.cost.ante, 3); H.eq(r1.cost.rerolls, 0); H.eq(r1.cost.dollars, 0)
+  H.eq(actions(r1), 'skip/Small'); H.eq(r1.steps[1].ante, 3); H.eq(r1.steps[1].key, small3)
+  H.eq(r1.cost.ante, 3); H.eq(r1.cost.rerolls, 0); H.eq(r1.cost.dollars, 0)
   -- The tag misses, a pack clause hits: only its shop, and it is bought.
   local f2 = F({{kind = 'tag', ante = 1, blind = 'Small', key = miss},
     {kind = 'pack', ante = 1, key_prefix = 'p_buffoon'}}, {mode = 'any'})
@@ -578,7 +588,7 @@ H.test('group: a group hit is routed as the member that hit, on its own', functi
       H.eq(oka, true, 'RGROUP'..i..': the member holds alone')
       deep_eq(r, assert(R.build(alone, da)), 'RGROUP'..i..' member '..m)
       if m == 2 then
-        H.eq(#r.steps, 0); H.eq(r.cost.ante, 3)
+        H.eq(actions(r), 'skip/Small'); H.eq(r.steps[1].ante, 3); H.eq(r.cost.ante, 3)
       else
         H.eq(r.steps[#r.steps].key, 'j_blueprint')
         replay(predict, state.copy(S), r)
@@ -614,7 +624,8 @@ end)
 H.test('group: a chained ante is routed from details.tag_packs when its from_tag member was not reached', function()
   local filter, predict, state = mods()
   local R = route()
-  local f = F({{kind = 'group', clauses = {{kind = 'tag', ante = 1, blind = 'Big', key = 'tag_juggle'},
+  -- A legendary member (any key) holds first; a tag member would be taken.
+  local f = F({{kind = 'group', clauses = {{kind = 'legendary', index = 1},
       {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}}},
     {kind = 'pack', ante = 1, key_prefix = 'p_'}})
   local seen = 0
@@ -640,4 +651,70 @@ H.test('group: a chained ante is routed from details.tag_packs when its from_tag
     end
   end
   H.ok(seen > 0, 'a Charm Small / Juggle Big seed in 200')
+end)
+
+H.test('taken tag: the route skips the tag\'s blind, and that blind\'s shop never comes up', function()
+  local filter, predict, state = mods()
+  local R = route()
+  local S = world{seed = 'RTAKE'}
+  local t = predict.tags(state.copy(S), 1)
+  local f = F({{kind = 'tag', ante = 1, blind = 'Small', key = t.small}, {kind = 'pack', ante = 1, key_prefix = 'p_'}})
+  local ok, d = filter.eval(state.copy(S), f)
+  H.eq(ok, true)
+  local r = assert(R.build(f, d))
+  -- A pack tag's pack opens at the skip and is closed untouched.
+  local opens = predict.ALL_TAG_PACKS[t.small] and ' open_pack/Small' or ''
+  H.eq(actions(r), 'skip/Small'..opens..' play/Big buy/shop')
+  H.eq(r.steps[1].key, t.small); H.ok(r.steps[1].text:find('^Skip the Small Blind %('), r.steps[1].text)
+  H.eq(r.steps[#r.steps].slot, d.results[2].slot)
+  replay(predict, state.copy(S), r)
+end)
+
+H.test('taken tags on both ante-1 blinds: the route skips both, and ante 2\'s Boss shop has the forced Buffoon', function()
+  local filter, predict, state = mods()
+  local R = route()
+  local S = world{seed = 'RTAKEBUF'}
+  local t = predict.tags(state.copy(S), 1)
+  local f = F({{kind = 'tag', ante = 1, blind = 'Small', key = t.small},
+    {kind = 'tag', ante = 1, blind = 'Big', key = t.big},
+    {kind = 'pack', ante = 2, key_prefix = 'p_buffoon_normal_1'}})
+  local ok, d = filter.eval(state.copy(S), f)
+  H.eq(ok, true)
+  local r = assert(R.build(f, d))
+  local want = 'skip/Small skip/Big'
+  -- A pack tag's pack opens at its skip (Charm here), and is closed untouched.
+  if t.big == 'tag_charm' or t.small == 'tag_charm' then want = nil end
+  if want then H.eq(actions(r):sub(1, #want), want) end
+  H.eq(r.steps[#r.steps].action, 'buy'); H.eq(r.steps[#r.steps].slot, 1)
+  H.eq(r.steps[#r.steps].key, 'p_buffoon_normal_1')
+  H.eq(r.cost.ante, 2)
+  replay(predict, state.copy(S), r)
+end)
+
+H.test('both ante-1 blinds skipped for a separate Charm branch: ante 2\'s Boss shop takes the forced Buffoon', function()
+  local filter, predict, state = mods()
+  local R = route()
+  -- The from_tag member is never reached (the legendary member holds first),
+  -- yet its branch policy skips both Charm blinds: the eval records the skips.
+  local f = F({{kind = 'group', clauses = {{kind = 'legendary', index = 1},
+      {kind = 'soul_in_pack', ante = 1, pack = 'arcana', from_tag = true}}},
+    {kind = 'pack', ante = 2, key_prefix = 'p_'}})
+  local seen = 0
+  for i = 1, 400 do
+    local S = world{seed = 'RBOTHCHARM'..i, tags = {'tag_charm', 'tag_juggle'}}
+    local t = predict.tags(state.copy(S), 1)
+    if t.small == 'tag_charm' and t.big == 'tag_charm' then
+      local ok, d = filter.eval(state.copy(S), f)
+      H.eq(ok, true, 'RBOTHCHARM'..i)
+      H.eq(d.results[1].results[2], nil, 'the from_tag member not reached')
+      H.eq(d.skips[1].Small, 'tag_charm'); H.eq(d.skips[1].Big, 'tag_charm')
+      H.eq(d.results[2].shop, 1); H.eq(d.results[2].slot, 1); H.eq(d.results[2].pack, 'p_buffoon_normal_1')
+      local r = assert(R.build(f, d))
+      H.eq(actions(r), 'skip/Small skip/Big play/Boss buy/shop')
+      replay(predict, state.copy(S), r)
+      seen = seen + 1
+      if seen >= 2 then break end
+    end
+  end
+  H.ok(seen > 0, 'a Charm Small / Charm Big seed in 400')
 end)

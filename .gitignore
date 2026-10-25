@@ -1,3 +1,5 @@
 build/
 tools/
 dist/
+site/README.md
+site/infra/versions.tf

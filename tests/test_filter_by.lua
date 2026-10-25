@@ -46,9 +46,9 @@ local function world(o)
     center('c_black_hole', {name = 'Black Hole', set = 'Spectral', order = 18, consumeable = true, hidden = true}),
     center('c_base', {name = 'Default Base', set = 'Default', order = 1}),
     center('m_bonus', {name = 'Bonus', set = 'Enhanced', order = 2}),
-    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true}),
-    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true}),
-    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true}),
+    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true, cost = 10}),
+    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true, cost = 10, config = {extra = 1}}),
+    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true, cost = 10, config = {extra = 2}}),
     center('b_red', {name = 'Red Deck', set = 'Back', order = 1}),
   }
   local boosters = {
@@ -343,39 +343,44 @@ end)
 H.test('each per-ante stream is drawn at most once per S, by clauses and plain ones sharing it', function()
   local filter, predict, state = mods()
   local at = seeder(state, world())
-  local walked = 0
+  local walked, ran = 0, 0
   for i = 1, 100 do
     local seed = 'ONCE'..i
     local v3 = predict.voucher(at(seed), 3)
     local t2 = predict.tags(at(seed), 2)
-    -- Every entry holds (mode all, so each is drawn): a plain voucher at 3
-    -- and a by voucher that reads 1..3, a plain tag at 2 and a by tag member
-    -- that reads 1..2, and a group whose from_tag member makes ante 2 a
-    -- chained ante (a walk that takes its skips from the same tag draw).
-    local f = F({
-      {kind = 'voucher', ante = 3, key = v3},
-      {kind = 'voucher', ante = 3, key = v3, by = true},
-      {kind = 'tag', ante = 2, blind = 'Big', key = t2.big},
-      grp({kind = 'tag', ante = 3, key = t2.big, by = true}, {kind = 'boss', ante = 3, key = 'bl_wall'}),
-      grp({kind = 'soul_in_pack', ante = 2, pack = 'arcana', from_tag = true}, {kind = 'pack', ante = 2, key_prefix = 'p_'}),
-    })
-    local log, ok, d = streams(function() return filter.eval(at(seed), f) end)
-    H.eq(ok, true, seed); H.eq(d.checked, 5, seed)
-    for a = 1, 3 do
-      local nv, nt = count(log, 'Voucher'..a), count(log, 'Tag'..a)
-      H.ok(nv <= 1, seed..': Voucher'..a..' drawn '..nv)
-      H.ok(nt == 0 or nt == 2, seed..': Tag'..a..' drawn '..nt..' (a draw is Small then Big)')
+    -- A voucher is bought once: where v3 shows below ante 3 the by clause
+    -- buys it there, and the plain clause misses (test_filter: bought once).
+    if predict.voucher(at(seed), 1) ~= v3 and predict.voucher(at(seed), 2) ~= v3 then
+      ran = ran + 1
+      -- Every entry holds (mode all, so each is drawn): a plain voucher at 3
+      -- and a by voucher that reads 1..3, a plain tag at 2 and a by tag member
+      -- that reads 1..2, and a group whose from_tag member makes ante 2 a
+      -- chained ante (a walk that takes its skips from the same tag draw).
+      local f = F({
+        {kind = 'voucher', ante = 3, key = v3},
+        {kind = 'voucher', ante = 3, key = v3, by = true},
+        {kind = 'tag', ante = 2, blind = 'Big', key = t2.big},
+        grp({kind = 'tag', ante = 3, key = t2.big, by = true}, {kind = 'boss', ante = 3, key = 'bl_wall'}),
+        grp({kind = 'soul_in_pack', ante = 2, pack = 'arcana', from_tag = true}, {kind = 'pack', ante = 2, key_prefix = 'p_'}),
+      })
+      local log, ok, d = streams(function() return filter.eval(at(seed), f) end)
+      H.eq(ok, true, seed); H.eq(d.checked, 5, seed)
+      for a = 1, 3 do
+        local nv, nt = count(log, 'Voucher'..a), count(log, 'Tag'..a)
+        H.ok(nv <= 1, seed..': Voucher'..a..' drawn '..nv)
+        H.ok(nt == 0 or nt == 2, seed..': Tag'..a..' drawn '..nt..' (a draw is Small then Big)')
+      end
+      H.eq(count(log, 'Voucher3'), 1, seed); H.eq(count(log, 'Tag2'), 2, seed)
+      H.eq(count(log, 'Tag3'), 0, seed..': the by tag stops by ante 2')
+      if count(log, 'shop_pack2') > 0 then walked = walked + 1 end
+      -- The by clauses alone on a fresh S agree with their results beside the rest.
+      local _, alone = filter.eval(at(seed), F({f.clauses[2]}))
+      deep_eq(d.results[2], alone.results[1], seed..' voucher by')
+      _, alone = filter.eval(at(seed), F({f.clauses[4].clauses[1]}))
+      deep_eq(d.results[4].results[1], alone.results[1], seed..' tag by member')
     end
-    H.eq(count(log, 'Voucher3'), 1, seed); H.eq(count(log, 'Tag2'), 2, seed)
-    H.eq(count(log, 'Tag3'), 0, seed..': the by tag stops by ante 2')
-    if count(log, 'shop_pack2') > 0 then walked = walked + 1 end
-    -- The by clauses alone on a fresh S agree with their results beside the rest.
-    local _, alone = filter.eval(at(seed), F({f.clauses[2]}))
-    deep_eq(d.results[2], alone.results[1], seed..' voucher by')
-    _, alone = filter.eval(at(seed), F({f.clauses[4].clauses[1]}))
-    deep_eq(d.results[4].results[1], alone.results[1], seed..' tag by member')
   end
-  H.ok(walked > 0, 'ante 2 walked on some seeds: '..walked)
+  H.ok(walked > 0 and ran > 20, 'ante 2 walked on some seeds: '..walked..' of '..ran)
 end)
 
 H.test('order: a by clause stays in its kind\'s class, with N as its ante for ties', function()
@@ -528,7 +533,16 @@ H.test('a by clause beside a legendary: the Soul\'s edition reads N, wherever th
   H.ok(early > 0 and moved > 0, 'the ante moves the edition on some seeds: '..moved)
 end)
 
-H.test('route: a by hit adds no step; cost.ante is the found ante, not N', function()
+-- The play step and redeem step a voucher bought at ante a makes (its first
+-- shop: the Boss's of a-1, or ante 1's Small when nothing skips it).
+local function bought_steps(r, a, key, where)
+  H.eq(#r.steps, 2, where..': play, then redeem')
+  H.eq(r.steps[1].action, 'play'); H.eq(r.steps[1].when, a > 1 and 'Boss' or 'Small', where)
+  H.eq(r.steps[1].ante, a > 1 and a - 1 or 1, where)
+  H.eq(r.steps[2].action, 'redeem'); H.eq(r.steps[2].key, key, where); H.eq(r.steps[2].ante, a, where)
+end
+
+H.test('route: a by voucher is bought where found, a by tag its skip; cost.ante is the found ante, not N', function()
   local filter, predict, state = mods()
   local R = route()
   local at = seeder(state, world())
@@ -541,9 +555,18 @@ H.test('route: a by hit adds no step; cost.ante is the found ante, not N', funct
       local ok, d = filter.eval(at(seed), f)
       if ok then
         local r = assert(R.build(f, d))
-        H.eq(#r.steps, 0, seed..': no step for a '..c.kind)
+        if c.kind == 'tag' then
+          -- The tag is taken: one skip, at the ante and blind it was found on.
+          H.eq(#r.steps, 1, seed..': the tag\'s skip')
+          H.eq(r.steps[1].action, 'skip'); H.eq(r.steps[1].ante, d.results[1].ante)
+          H.eq(r.steps[1].when, d.results[1].blind); H.eq(r.steps[1].key, 'tag_juggle')
+        else
+          -- The voucher is bought (seedfinder.filter: voucher clauses are bought).
+          bought_steps(r, d.results[1].ante, 'v_hone', seed)
+          H.eq(d.bought[d.results[1].ante], 'v_hone', seed)
+        end
         H.eq(r.cost.ante, d.results[1].ante, seed..' '..c.kind..': cost.ante = the found ante')
-        H.eq(r.cost.rerolls, 0); H.eq(r.cost.dollars, 0)
+        H.eq(r.cost.rerolls, 0); H.eq(r.cost.dollars, c.kind == 'voucher' and 10 or 0)
         found[d.results[1].ante] = true
         -- Beside a plain boss at ante 2 ('all'): the route ends at the later.
         local T = at(seed)
@@ -559,7 +582,8 @@ H.test('route: a by hit adds no step; cost.ante is the found ante, not N', funct
     local okg, dg = filter.eval(at(seed), g)
     if okg and dg.results[1].hit == 1 then
       local r = assert(R.build(g, dg))
-      H.eq(#r.steps, 0); H.eq(r.cost.ante, dg.results[1].results[1].ante, seed..' group')
+      bought_steps(r, dg.results[1].results[1].ante, 'v_grabber', seed..' group')
+      H.eq(r.cost.ante, dg.results[1].results[1].ante, seed..' group')
     end
   end
   H.ok(found[1] and found[2] and found[3], 'hits found at antes 1, 2 and 3')

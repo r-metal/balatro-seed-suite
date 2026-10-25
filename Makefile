@@ -10,7 +10,7 @@ VERSION = $(shell python3 scripts/release.py version)
 MODS := $(notdir $(patsubst %/lovely.toml,%,$(wildcard mods/*/lovely.toml)))
 LUA_SRC := $(wildcard mods/*/src/*.lua mods/*/src/*/*.lua) $(wildcard tests/*.lua) $(wildcard rig/*.lua rig/scenarios/*.lua)
 
-.PHONY: check lint unit native smoke smoke-dist lovely-smoke lovely-check game-src clear-installed install install-zip uninstall dist notes export clean
+.PHONY: check lint unit native smoke smoke-dist lovely-smoke lovely-check game-src clear-installed install install-zip uninstall dist notes export clean site site-serve site-deploy
 
 # Tests run at low CPU priority so a game being played keeps its frame rate.
 NICE ?= nice -n 15
@@ -56,7 +56,7 @@ smoke-dist: dist game-src
 lovely-smoke: dist game-src
 	@rig/lovely-rig.sh $(S) $(if $(SMODS),--smods)
 
-LOVELY_MATRIX := boot: finder_search: finder_search:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods \
+LOVELY_MATRIX := boot: finder_search: finder_search:--smods finder_take:--smods finder_voucher:--smods lovely_oracle_smods:--smods lovely_smods_listing:--smods \
   lovely_paused_sim:--smods lovely_preview_smods:--smods golden_stable:--smods golden_walk:--smods golden_tagpacks:--smods \
   text_digits:--smods finder_names:--smods saveslots_folders:--smods saveslots_backup:--smods daily_run:--smods \
   runjournal_runinfo:--smods runjournal_flags:--smods
@@ -103,6 +103,11 @@ notes:
 export:
 	@test -n "$(PUBLIC)" || { echo "export: pass PUBLIC=<path to the public checkout>"; exit 1; }
 	@python3 scripts/release.py export "$(PUBLIC)" $(or $(REF),v$(VERSION))
+
+# The landing page at bss.r-metal.tech (site/, private repo only): build, tailnet preview, deploy.
+site site-serve site-deploy:
+	@test -f site/Makefile || { echo "$@: site/ is not in this checkout"; exit 1; }
+	@$(MAKE) -s -C site $(or $(patsubst site-%,%,$(filter-out site,$@)),build)
 
 clean:
 	rm -rf build

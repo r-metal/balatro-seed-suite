@@ -3,8 +3,12 @@
 -- the real run; the prediction is made from state.fresh(seed) before that run
 -- exists.
 --
--- Per seed (Red Deck; stake 1, or stake 8 for the Gold seeds, so eternal,
--- perishable and rental stickers are in play):
+-- Per seed (Red Deck unless named; stake 1, or stake 8 for the Gold seeds, so
+-- eternal, perishable and rental stickers are in play). The deck seeds cover
+-- what a deck's queued events change (sim.state: fresh applies them from the
+-- deck's config): Zodiac's Merchants and Overstock (3-card rows, 9.6 rates),
+-- and Magic's Fools and Ghost's Hex in used_jokers (MAGIC29's Arcana pack and
+-- GHOST141's Spectral pack each drew the held card and resample it):
 --   1. predict: fresh(seed), then predict.plan(S, {antes = 3, rerolls =
 --      REROLLS, open_packs = true}) -- every stable and conditional call in the
 --      game's order (predict.lua header).
@@ -22,7 +26,7 @@
 --   the shop after ante A's Boss comes after ease_ante, so it is "ante A+1
 --   shop 1". Antes 1-2 played = 6 shops: ante 1 shops 1-2, ante 2 shops 1-3,
 --   ante 3 shop 1. -> "check: golden_shop <seed> ante <a> shop <s> ok" each.
--- After the last seed: "check: golden_shop all 10 seeds match".
+-- After the last seed: "check: golden_shop all 13 seeds match".
 -- On any mismatch both values are logged and the scenario fails.
 -- The run's first shop pack is vanilla's forced Buffoon, whose _1/_2 art
 -- variant is unseeded math.random (cosmetic): either key is accepted for it.
@@ -35,6 +39,7 @@ local predict = require('bhcore.sim.predict')
 local SEEDS = {
   {'E67DHZM3', 1}, {'7LB2WVPK', 1}, {'SHOPGLD1', 1}, {'ZQ9Y8XW6', 1}, {'HNM4KD2P', 1},
   {'R2D2C3P9', 1}, {'PACKS4ME', 1}, {'GOLDST8K', 8}, {'QWERTY12', 8}, {'MNB5VCX4', 8},
+  {'ZOD1', 1, 'b_zodiac'}, {'MAGIC29', 1, 'b_magic'}, {'GHOST141', 1, 'b_ghost'},
 }
 local LAST_ANTE = 2 -- antes played in full; the Boss's shop is ante LAST_ANTE+1 shop 1
 local REROLLS = 2
@@ -258,20 +263,21 @@ local steps = {
 }
 
 for _, sd in ipairs(SEEDS) do
-  local seed, stake = sd[1], sd[2]
+  local seed, stake, deck = sd[1], sd[2], sd[3] or 'b_red'
   steps[#steps + 1] = {name = 'predict and start '..seed, run = function(ctx)
     local before = STR_PACK(G.GAME)
-    local S = state.fresh(seed, {stake = stake, deck = 'b_red'})
+    local S = state.fresh(seed, {stake = stake, deck = deck})
     plan[seed] = predict.plan(S, {antes = LAST_ANTE + 1, shops_per_ante = 3, rerolls = REROLLS, open_packs = true})
     ctx.assert(STR_PACK(G.GAME) == before, 'prediction touched the live G.GAME')
     seen[seed] = {}
+    G.GAME.viewed_back = Back(G.P_CENTERS[deck])
     ctx.start_run{seed = seed, stake = stake}
     return true
   end}
   steps[#steps + 1] = {name = 'ready '..seed, timeout = 20, run = function(ctx)
     if not run_ready(seed) then return false end
-    ctx.assert(G.GAME.stake == stake and G.GAME.selected_back.name == 'Red Deck',
-      seed..': not stake '..stake..' Red Deck')
+    ctx.assert(G.GAME.stake == stake and G.GAME.selected_back.name == G.P_CENTERS[deck].name,
+      seed..': not stake '..stake..' '..G.P_CENTERS[deck].name)
     return true
   end}
   steps[#steps + 1] = {name = 'play '..seed, timeout = 60, run = play_step(seed)}

@@ -8,9 +8,11 @@
 --     or nil, err ('not a hit' when details is not a hit for f; the filter's
 --     own validate error for an invalid f). details is filter.eval(S, f)'s.
 --   step = {ante, when = 'Small'|'Big'|'Boss'|'shop',
---           action = 'skip'|'play'|'open_pack'|'reroll'|'use_soul'|'buy',
+--           action = 'skip'|'play'|'open_pack'|'reroll'|'use_soul'|'buy'|'redeem',
 --           slot, index, key, text}
---     skip      the blind whose Charm/Ethereal tag opens a pack; key = the tag.
+--     skip      a blind skipped: its tag is taken (a tag clause), or it is a
+--               Charm/Ethereal blind a from_tag clause skips; key = the tag.
+--               A tag that gives a pack is followed by that pack's open_pack.
 --     play      a blind played (not skipped) so its shop comes up; the ante is
 --               the blind's own (the shop after the Boss of A-1 draws ante A).
 --     reroll    index = the reroll's number within its shop; key/slot name the
@@ -26,6 +28,11 @@
 --     buy       the pack a 'pack' clause found, bought (and opened) as the last
 --               step of its ante; left out when a later step of that ante would
 --               draw after it.
+--     redeem    a voucher bought (key = the voucher) in its ante's first shop,
+--               straight after the play step that opens it and before that
+--               shop's rerolls and packs: a voucher clause's own, or the
+--               tier-1 a tier-2 clause needs (seedfinder.filter header:
+--               voucher clauses are bought).
 --   route.rank(f, hits) -> the hits sorted by route cost, cheapest first, and
 --     costs (costs[k] = the route cost of the k-th, nil when it has no route),
 --     or nil, err for an invalid f. hits = {{seed, details}...} (or {seed =,
@@ -35,9 +42,9 @@
 --     with no route (details nil or not a hit for f) goes last.
 --   cost.ante is the ante the route ends in; cost.rerolls the rerolls it makes;
 --   cost.dollars the rerolls at vanilla's base price ($5, +$1 per reroll within
---   a shop) plus every shop pack at G.P_CENTERS[key].cost, or nil when a pack's
---   key or cost is unknown. Tag packs are free. Vouchers and discounts are not
---   modelled.
+--   a shop) plus every shop pack and voucher bought at G.P_CENTERS[key].cost,
+--   or nil when a pack's key or a cost is unknown. Tag packs are free.
+--   Discounts (Clearance Sale, Reroll Surplus, ...) are not modelled.
 --
 -- Texts are written to sit under an "Ante N" heading (the Finder's Route panel
 -- groups steps by st.ante): no step repeats "Ante N:". A Soul the route uses
@@ -49,17 +56,30 @@
 -- hit (its details' hit), routed like that clause on its own; the other
 -- members add nothing, though their needs still shape the walk the route
 -- replays (needs and chained antes come from every plain clause of f, group
--- members included, as the filter's walk does). A chained ante's skips are
--- read off the details' tag_packs (a from_tag member there may never have
--- been evaluated).
--- tag / boss / voucher / legendary clauses add no step (the filter
--- assumes no action for them); their antes still count toward cost.ante.
--- A tag or voucher clause with by ("by ante N", T-313a) adds no step either
--- (no route step draws the per-ante 'Tag'/'Voucher' streams, so nothing is
--- played for it; as for a plain tag clause, no step names the blind to skip
--- for the tag), and it counts the ante its details found it in
--- (details.ante), not N. So does a boss clause with by (T-375): the route
--- never rerolls a boss, and the found ante counts, not N.
+-- members included, as the filter's walk does). A walked ante's skips are
+-- read off the details' skips, and a tag pack's cards off its tag_packs (a
+-- from_tag member there may never have been evaluated).
+-- A tag clause adds its skip (seedfinder.filter header: tag clauses are
+-- taken): "Skip the Small Blind (Investment Tag).", then the pack a pack tag
+-- opens, closed with nothing taken. It is listed even after the ante's last
+-- target, and in an ante the walk never reached. A by tag clause skips at the
+-- ante and blind its details found it (details.ante, details.blind) and
+-- counts that ante, not N.
+-- boss / legendary clauses add no step (the filter assumes no action for
+-- them); their antes still count toward cost.ante. A boss clause with by
+-- (T-375) counts the ante its details found it in (details.ante), not N: the
+-- route never rerolls a boss. Skips the eval assumed of an unwalked ante 1
+-- (details.skips[1]: both blinds, placing the forced Buffoon) are listed too.
+-- A voucher clause is bought (seedfinder.filter header): the route replays
+-- every purchase the eval's walk made (details.bought) up to the route's last
+-- ante, a voucher clause's own and the tier-1 a tier-2 clause needs alike,
+-- each as a redeem step in its ante's first shop (the Boss's, or at ante 1
+-- the first blind played), whether or not the walk walked that ante: "Shop
+-- after the Small Blind: buy the Overstock voucher (Overstock Plus needs
+-- it)." Purchases past that ante shape nothing the route needs. A voucher
+-- clause counts its ante toward cost.ante, a by one ("by ante N", T-313a)
+-- the ante its details found it in (details.ante), not N. A Hieroglyph
+-- clause adds no step: the filter never buys it.
 -- An excluded clause (exclude = true, T-375, a must-not) adds no step and no
 -- cost: it is not routed, and its ante (or N) does not count toward
 -- cost.ante. Only its needs remain, as the filter's walk drew them (a
@@ -114,7 +134,7 @@ local function pack_name(key)
   return key and ('the '..center_name(key)) or 'the pack'
 end
 
-local function pack_cost(key)
+local function center_cost(key)
   local c = key and G and G.P_CENTERS and G.P_CENTERS[key]
   return c and type(c.cost) == 'number' and c.cost or nil
 end
@@ -236,26 +256,35 @@ local function known_packs(f, details, a)
   return known
 end
 
--- Ante a's events in play order: {type = 'tag', pack = <details pack>} or
--- {type = 'shop', after = 'Boss'|'Small'|'Big', shop = s}.
-local function events_of(a, n, packs)
-  local ev = {}
-  if not n then
-    for _, p in ipairs(packs or {}) do ev[#ev + 1] = {type = 'tag', pack = p} end
-    return ev
-  end
-  local s = 0
+-- The blind a routed tag clause takes (filter.lua's tag_blind on its
+-- details: Small first), and the ante: a by clause's found ante.
+local function taken_blind(c, r)
+  if c.by then return r.ante, r.blind end
+  local blind = c.blind or 'any'
+  if (blind == 'Small' or blind == 'any') and r.small == c.key then return c.ante, 'Small' end
+  if (blind == 'Big' or blind == 'any') and r.big == c.key then return c.ante, 'Big' end
+end
+
+-- Ante a's events in play order: {type = 'tag', blind, tag, pack = <details
+-- pack> or nil} or {type = 'shop', after = 'Boss'|'Small'|'Big', shop = s}.
+-- skip[blind] = {tag, pack} for each skipped blind; walked: the filter walked
+-- the ante's shops (every other blind is played), else only skips happen,
+-- and the ante's first shop when a voucher is bought there (buy).
+local function events_of(a, walked, skip, buy)
+  local ev, s = {}, 0
   local function shop(after) s = s + 1; ev[#ev + 1] = {type = 'shop', after = after, shop = s} end
-  if a > 1 then shop('Boss') end
+  if (walked or buy) and a > 1 then shop('Boss') end
   for _, blind in ipairs{'Small', 'Big'} do
-    local p
-    if n.chained then
-      for _, q in ipairs(packs or {}) do if q.blind == blind then p = q end end
+    local k = skip[blind]
+    if k then
+      ev[#ev + 1] = {type = 'tag', blind = blind, tag = k.tag, pack = k.pack}
+    elseif walked or (buy and s == 0) then
+      shop(blind)
     end
-    if p then ev[#ev + 1] = {type = 'tag', pack = p} else shop(blind) end
   end
   return ev
 end
+
 
 ------------------------------------------------------------------------------
 -- Build
@@ -267,10 +296,17 @@ function M.build(f, details)
   if not idx then return nil, 'not a hit' end
   local needs = needs_of(f)
 
-  -- Routed clauses by ante; the highest ante any of them names.
-  local by_ante, last_ante = {}, 1
+  -- Routed clauses by ante; the highest ante any of them names. takes[a] =
+  -- the blinds a routed tag clause takes there (the player skips for it).
+  local by_ante, last_ante, takes = {}, 1, {}
   for _, t in ipairs(idx) do
     local c, r = t.c, t.r
+    if c.kind == 'tag' then
+      local ta, tb = taken_blind(c, r)
+      if not (ta and tb) then return nil, 'details: tag '..t.name..' names no blind' end
+      takes[ta] = takes[ta] or {}
+      takes[ta][tb] = c.key
+    end
     -- A joker clause, or a tag / voucher clause with by, ends where its
     -- details found it (never N in their place when the details name none).
     local found = c.kind == 'joker' or c.by
@@ -286,8 +322,25 @@ function M.build(f, details)
       table.insert(by_ante[a], {c = c, r = r})
     end
   end
-  local antes = {}
-  for a in pairs(by_ante) do antes[#antes + 1] = a end
+  -- The walk's purchases up to that ante, and for each tier-1 a routed
+  -- tier-2 voucher clause needs, that clause's key.
+  local bought, needed_by = {}, {}
+  for a, key in pairs(type(details.bought) == 'table' and details.bought or {}) do
+    if type(a) == 'number' and a <= last_ante then bought[a] = key end
+  end
+  for _, t in ipairs(idx) do
+    if t.c.kind == 'voucher' then
+      for _, r in ipairs(filter.prerequisites(t.c.key)) do needed_by[r] = needed_by[r] or t.c.key end
+    end
+  end
+  local antes, listed = {}, {}
+  for a in pairs(by_ante) do antes[#antes + 1] = a; listed[a] = true end
+  for a in pairs(takes) do if not listed[a] then antes[#antes + 1] = a; listed[a] = true end end
+  for a in pairs(bought) do if not listed[a] then antes[#antes + 1] = a; listed[a] = true end end
+  -- An unwalked ante's recorded skips (ante 1's, placing the forced Buffoon).
+  for a in pairs(type(details.skips) == 'table' and details.skips or {}) do
+    if not listed[a] and not needs[a] then antes[#antes + 1] = a; listed[a] = true end
+  end
   table.sort(antes)
 
   local steps, dollars, rerolls = {}, 0, 0
@@ -300,7 +353,34 @@ function M.build(f, details)
     local n = needs[a]
     local packs = tag_packs(f, details, a)
     if n and n.chained and not packs then return nil, 'details: no tag packs at chained ante '..a end
-    local ev = events_of(a, n, packs)
+    -- A walked ante replays the walk's skips (details.skips: taken tags, and a
+    -- chained ante's pack tags); elsewhere the skips are the taken tags and a
+    -- separate from_tag branch's pack tags (both its blinds are skipped).
+    local walked = n ~= nil and (details.walked == nil or a <= details.walked)
+    local skip, must = {}, {} -- must: skips always listed (taken, or recorded)
+    local function pack_at(blind)
+      for _, q in ipairs(packs or {}) do if q.blind == blind then return q end end
+    end
+    if walked then
+      local sk = type(details.skips) == 'table' and details.skips[a]
+      if sk then
+        for blind, tag in pairs(sk) do skip[blind] = {tag = tag, pack = pack_at(blind)} end
+      elseif n.chained then
+        for _, q in ipairs(packs or {}) do skip[q.blind] = {tag = q.tag, pack = q} end
+      end
+    else
+      for _, q in ipairs(packs or {}) do skip[q.blind] = {tag = q.tag, pack = q} end
+      for blind, tag in pairs(takes[a] or {}) do skip[blind] = skip[blind] or {tag = tag} end
+      -- Skips the eval assumed of an unwalked ante (ante 1's, placing the
+      -- forced Buffoon) are replayed even when no routed clause names them.
+      local sk = type(details.skips) == 'table' and details.skips[a]
+      for blind, tag in pairs(sk or {}) do
+        skip[blind] = skip[blind] or {tag = tag}
+        must[blind] = true
+      end
+    end
+    for blind in pairs(takes[a] or {}) do must[blind] = true end
+    local ev = events_of(a, walked, skip, bought[a] ~= nil)
     local known = known_packs(f, details, a)
 
     -- What each event must deliver: targets[e] = {soul_slot, reroll, joker, pack...}.
@@ -310,11 +390,22 @@ function M.build(f, details)
       if e > last then last = e end
       return want[e]
     end
-    for _, t in ipairs(by_ante[a]) do
+    -- The ante's voucher is bought in its first shop.
+    if bought[a] then
+      local e
+      for k, x in ipairs(ev) do if x.type == 'shop' then e = k; break end end
+      if not e then return nil, 'details: ante '..a..' has no shop to buy '..tostring(bought[a])..' in' end
+      target(e).redeem = bought[a]
+    end
+    -- A taken tag's skip is always listed, even after the ante's last target.
+    for e, x in ipairs(ev) do
+      if x.type == 'tag' and must[x.blind] then target(e) end
+    end
+    for _, t in ipairs(by_ante[a] or {}) do
       local c, r = t.c, t.r
       if c.kind == 'soul_in_pack' and c.from_tag then
         for e, x in ipairs(ev) do
-          if x.type == 'tag' and x.pack.blind == r.blind then target(e).tag_soul = r.index end
+          if x.type == 'tag' and x.pack and x.blind == r.blind then target(e).tag_soul = r.index end
         end
       else
         local e
@@ -347,15 +438,17 @@ function M.build(f, details)
     for e = 1, last do
       local x, w = ev[e], want[e] or {jokers = {}, packs = {}}
       if x.type == 'tag' then
+        add{ante = a, when = x.blind, action = 'skip', key = x.tag,
+          text = ('Skip the %s (%s).'):format(BLIND[x.blind], tag_name(x.tag))}
         local p = x.pack
-        add{ante = a, when = p.blind, action = 'skip', key = p.tag,
-          text = ('Skip the %s (%s).'):format(BLIND[p.blind], tag_name(p.tag))}
-        local open = add{ante = a, when = p.blind, action = 'open_pack', key = p.pack, index = w.tag_soul}
-        if w.tag_soul then
-          open.soul = true
-          open.text = ('%s holds the Soul in slot %d: take it.'):format((pack_name(p.pack):gsub('^t', 'T')), w.tag_soul)
-        else
-          open.text = ('Open %s and take nothing.'):format(pack_name(p.pack))
+        if p then
+          local open = add{ante = a, when = x.blind, action = 'open_pack', key = p.pack, index = w.tag_soul}
+          if w.tag_soul then
+            open.soul = true
+            open.text = ('%s holds the Soul in slot %d: take it.'):format((pack_name(p.pack):gsub('^t', 'T')), w.tag_soul)
+          else
+            open.text = ('Open %s and take nothing.'):format(pack_name(p.pack))
+          end
         end
       else
         local final = e == last
@@ -367,13 +460,25 @@ function M.build(f, details)
         for _, p in ipairs(w.packs) do
           notes[#notes + 1] = ('%s is in slot %d'):format(pack_name(p.key), p.slot)
         end
-        local text = ('Play the %s.'):format(BLIND[x.after])
-        if #notes > 0 then text = text..' In its shop, '..table.concat(notes, '; ')..'.' end
-        add{ante = blind_ante, when = x.after, action = 'play', text = text}
-
+        local seen = #notes > 0 and table.concat(notes, '; ') or nil
         local where = x.after == 'Boss' and ('Shop after the ante-%d Boss'):format(a - 1)
           or ('Shop after the %s'):format(BLIND[x.after])
-        local nr = final and (w.rerolls or 0) or n.rerolls
+        -- A purchase comes first in its shop, and the row is read after it
+        -- (Overstock's new slot is filled at once).
+        local text = ('Play the %s.'):format(BLIND[x.after])
+        if seen and not w.redeem then text = text..' In its shop, '..seen..'.' end
+        add{ante = blind_ante, when = x.after, action = 'play', text = text}
+        if w.redeem then
+          local t = ('%s: buy the %s voucher'):format(where, center_name(w.redeem))
+          if needed_by[w.redeem] then t = t..(' (%s needs it)'):format(center_name(needed_by[w.redeem])) end
+          t = t..'.'
+          if seen then t = t..' Then '..seen..'.' end
+          add{ante = a, when = 'shop', action = 'redeem', key = w.redeem, text = t}
+          local cost = center_cost(w.redeem)
+          dollars = dollars and cost and dollars + cost or nil
+        end
+
+        local nr = final and (w.rerolls or 0) or (n and n.rerolls or 0)
         for k = 1, nr do
           local price = M.REROLL_BASE + k - 1
           local st = add{ante = a, when = 'shop', action = 'reroll', index = k}
@@ -389,7 +494,7 @@ function M.build(f, details)
           rerolls = rerolls + 1
           if dollars then dollars = dollars + price end
         end
-        local no = n.open and (final and (w.open or 0) or 2) or 0
+        local no = n and n.open and (final and (w.open or 0) or 2) or 0
         for slot = 1, no do
           local key = known[x.shop] and known[x.shop][slot]
           local idx_soul = w.soul and w.soul[slot]
@@ -407,7 +512,7 @@ function M.build(f, details)
           else
             st.text = ('%s: buy and open %s in slot %d; take nothing.'):format(where, pack_name(key), slot)
           end
-          local cost = pack_cost(key)
+          local cost = center_cost(key)
           dollars = dollars and cost and dollars + cost or nil
         end
         if final then
@@ -415,7 +520,7 @@ function M.build(f, details)
             if p.slot > no then
               add{ante = a, when = 'shop', action = 'buy', slot = p.slot, key = p.key,
                 text = ('%s: buy %s in slot %d.'):format(where, pack_name(p.key), p.slot)}
-              local cost = pack_cost(p.key)
+              local cost = center_cost(p.key)
               dollars = dollars and cost and dollars + cost or nil
             end
           end

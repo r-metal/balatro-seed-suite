@@ -44,9 +44,9 @@ local function world(o)
     center('c_black_hole', {name = 'Black Hole', set = 'Spectral', order = 18, consumeable = true, hidden = true}),
     center('c_base', {name = 'Default Base', set = 'Default', order = 1}),
     center('m_bonus', {name = 'Bonus', set = 'Enhanced', order = 2}),
-    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true}),
-    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true}),
-    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true}),
+    center('v_overstock_norm', {name = 'Overstock', set = 'Voucher', order = 1, unlocked = true, cost = 10}),
+    center('v_grabber', {name = 'Grabber', set = 'Voucher', order = 2, unlocked = true, cost = 10, config = {extra = 1}}),
+    center('v_hone', {name = 'Hone', set = 'Voucher', order = 3, unlocked = true, cost = 10, config = {extra = 2}}),
     center('b_red', {name = 'Red Deck', set = 'Back', order = 1}),
   }
   local boosters = {

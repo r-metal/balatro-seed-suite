@@ -16,6 +16,19 @@
 --                            Built inside sandbox.run: the live G.GAME is never
 --                            touched. Errors on an unknown deck.
 --   state.copy(S)            an independent deep copy, numbers exact.
+--   state.redeem(S, key)     -> S: the voucher `key` redeemed now (Card:redeem,
+--                            card.lua:1813-1852): used_vouchers[key], and the
+--                            Card:apply_to_run effects generation reads, the
+--                            ones fresh applies for a deck's starting vouchers
+--                            (rates, shop.joker_max). A shop slot it adds is
+--                            not filled here (predict.ante_walk does that for a
+--                            purchase in an open shop). Raises for a voucher
+--                            in state.REWINDS, and a modded voucher's own
+--                            redeem code is not run.
+--   state.REWINDS            {[center name] = true}: Hieroglyph and Petroglyph,
+--                            whose apply_to_run sets the ante back (ease_ante,
+--                            card.lua:1957-1958). The run then replays an ante,
+--                            which no sim state or caller models.
 --
 -- What fresh reproduces from Game:start_run (game.lua:2018-2176), no challenge:
 --   Game:init_game_object(); modifiers table; stake; STOP_USE = 0; the stake
@@ -26,12 +39,15 @@
 --   selected_back is "MANUAL_REPLACE" and selected_back_key a plain-data copy
 --   of the deck center, what capture() of a vanilla run holds (functions,
 --   which Steamodded adds to some decks, are dropped).
--- Not reproduced: anything the deck queues as an event (Magic Deck's Fools,
---   and the rate/slot changes Zodiac, Magic and similar decks' vouchers apply
---   through Card.apply_to_run's events). start_run's own first generation runs
---   before those events, so leaving them out is exact for that moment; state
---   read later in the run (shop rates, joker_max) must come from capture().
---   Those events are handed to a throwaway queue, never the live E_MANAGER.
+-- The deck's queued events are handed to a throwaway queue, never the live
+--   E_MANAGER; start_run's own first generation (boss, voucher, tags) runs
+--   before them. What they leave that later generation reads is applied from
+--   the deck's config instead: its starting vouchers' rates and shop slots
+--   (Card.apply_to_run's events: Zodiac's Merchants and Overstock), and its
+--   starting consumables in used_jokers (Magic's Fools, Ghost's Hex), held for
+--   the rest of the run. Checked against the real game by
+--   rig/scenarios/golden_decks.lua. Other event work (Checkered's suits,
+--   Crystal Ball's slot) draws nothing and feeds no pool.
 --
 -- Traps
 --   * STR_PACK writes numbers with tostring, i.e. %.14g. pseudorandom's
@@ -119,6 +135,60 @@ end
 -- A queue that drops everything: the deck's deferred work never reaches the game.
 local NULL_EVENTS = {add_event = function() end, clear_queue = function() end}
 
+-- Card:apply_to_run (card.lua:1880-1908): the voucher effects generation reads,
+-- each queued as an event in vanilla (and the whole call under Steamodded).
+local VOUCHER_EVENTS = {
+  ['Overstock'] = function(g) g.shop.joker_max = g.shop.joker_max + 1 end,
+  ['Overstock Plus'] = function(g) g.shop.joker_max = g.shop.joker_max + 1 end,
+  ['Tarot Merchant'] = function(g, extra) g.tarot_rate = 4 * extra end,
+  ['Tarot Tycoon'] = function(g, extra) g.tarot_rate = 4 * extra end,
+  ['Planet Merchant'] = function(g, extra) g.planet_rate = 4 * extra end,
+  ['Planet Tycoon'] = function(g, extra) g.planet_rate = 4 * extra end,
+  ['Hone'] = function(g, extra) g.edition_rate = extra end,
+  ['Glow Up'] = function(g, extra) g.edition_rate = extra end,
+  ['Magic Trick'] = function(g, extra) g.playing_card_rate = extra end,
+  ['Illusion'] = function(g, extra) g.playing_card_rate = extra end,
+}
+
+M.REWINDS = {Hieroglyph = true, Petroglyph = true}
+
+function M.redeem(S, key)
+  assert(type(S) == 'table' and type(S.game) == 'table', 'state.redeem: not a sim state')
+  local v = G.P_CENTERS and G.P_CENTERS[key]
+  assert(type(v) == 'table' and v.set == 'Voucher', 'state.redeem: not a voucher '..tostring(key))
+  assert(not M.REWINDS[v.name], 'state.redeem: '..tostring(v.name)..' sets the ante back, which the sim does not model')
+  local g = S.game
+  g.used_vouchers = g.used_vouchers or {}
+  g.used_vouchers[key] = true
+  local apply = VOUCHER_EVENTS[v.name]
+  if apply then apply(g, v.config and v.config.extra) end
+  return S
+end
+
+-- What the deck's dropped events leave behind that generation reads (they run
+-- before the first shop): its starting vouchers' rates and shop slots, and the
+-- used_jokers write of its starting consumables (back.lua:184-195 ->
+-- create_card -> Card:set_ability, every center sharing the name). The
+-- consumables stay held, so nothing a shop or pack makes ever releases them.
+local function deck_events(g, center)
+  local cfg = center.config or {}
+  local vouchers = {cfg.voucher}
+  for _, v in pairs(cfg.vouchers or {}) do vouchers[#vouchers + 1] = v end
+  for _, key in pairs(vouchers) do
+    local v = G.P_CENTERS[key]
+    local apply = v and VOUCHER_EVENTS[v.name]
+    if apply then apply(g, v.config and v.config.extra) end
+  end
+  for _, key in ipairs(cfg.consumables or {}) do
+    local c = G.P_CENTERS[key]
+    if c then
+      for k, v in pairs(G.P_CENTERS) do
+        if v.name == c.name then g.used_jokers[k] = true end
+      end
+    end
+  end
+end
+
 local function apply_back(center)
   local live_events = G.E_MANAGER
   G.E_MANAGER = NULL_EVENTS
@@ -144,6 +214,8 @@ local function build(S, seed, stake, deck)
     if STAKE_RULES[level] then STAKE_RULES[level](g) end
   end
   apply_back(center)
+  g.used_jokers = g.used_jokers or {}
+  deck_events(g, center)
 
   local p = g.starting_params
   g.round_resets.hands = p.hands
